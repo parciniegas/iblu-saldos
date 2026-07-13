@@ -3,7 +3,7 @@ dist
 .env
 .env.*
 *.log
-logs/*.json
+logs/*.json*
 .DS_Store
 coverage
 .vscode

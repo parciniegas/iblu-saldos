@@ -1,7 +1,52 @@
 import { PrismaClient } from '@prisma/client';
 import pino from 'pino';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const prisma = new PrismaClient();
+const __dirname = fileURLToPath(new URL('.', import.meta.url));
+
+type MinimalConfig = {
+  connectionString?: {
+    mariaDb?: string;
+  };
+};
+
+function readConnectionStringFromConfigFile(): string | undefined {
+  const configPath = path.resolve(__dirname, '../../../config.json');
+
+  try {
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    const parsed = JSON.parse(raw) as MinimalConfig;
+    return parsed.connectionString?.mariaDb;
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveDatabaseUrl(): string | undefined {
+  return process.env.DATABASE_URL
+    ?? process.env.ConnectionStrings__MariaDb
+    ?? readConnectionStringFromConfigFile();
+}
+
+const databaseUrl = resolveDatabaseUrl();
+
+if (databaseUrl) {
+  process.env.DATABASE_URL = databaseUrl;
+}
+
+const prisma = new PrismaClient(
+  databaseUrl
+    ? {
+        datasources: {
+          db: {
+            url: databaseUrl,
+          },
+        },
+      }
+    : undefined,
+);
 
 let logger: pino.Logger | null = null;
 

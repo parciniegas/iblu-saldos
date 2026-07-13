@@ -1,49 +1,26 @@
 declare module 'amqp10' {
-  export const Transport: {
-    tls(): unknown;
-  };
-
-  export type SessionOptions = {
-    settleSelfAck?: boolean;
-  };
-
-  export type SessionCreateOptions = {
-    autoAttach?: boolean;
-  };
-
-  export type Delivery = {
-    tag: Buffer;
-    payload: Buffer;
-  };
-
   export type AmqpMessage = {
     body: unknown;
+    _deliveryId?: number;
   };
 
   export interface Sender {
-    send(delivery: Delivery, callback: (err: Error | null, deliveryResult: unknown) => void): void;
+    send(message: unknown): Promise<unknown>;
   }
 
   export interface Receiver {
     on(event: 'message', handler: (message: AmqpMessage) => void | Promise<void>): void;
-    ack(message: AmqpMessage): void;
-  }
-
-  export interface Session {
-    once(event: 'senderCreated', handler: (sender: Sender) => void): void;
-    once(event: 'receiverCreated', handler: (receiver: Receiver) => void): void;
-    createSender(): void;
-    createReceiver(address: string): void;
-    close(): Promise<void>;
+    accept(message: AmqpMessage): void;
   }
 
   export class Client {
-    constructor(transport: unknown, connectionString: string);
+    constructor(policy?: unknown, policyOverrides?: unknown);
+    connect(url: string, policyOverrides?: unknown): Promise<void>;
     on(event: 'connected', handler: () => void): void;
-    on(event: 'error', handler: (err: Error) => void): void;
+    on(event: 'client:errorReceived', handler: (err: Error) => void): void;
     on(event: 'disconnected', handler: () => void): void;
-    once(event: 'sessionCreated', handler: (session: Session) => void): void;
-    createSession(options?: SessionOptions, createOptions?: SessionCreateOptions): void;
-    close(): Promise<void>;
+    createSender(address: string, policyOverrides?: unknown): Promise<Sender>;
+    createReceiver(address: string, policyOverrides?: unknown): Promise<Receiver>;
+    disconnect(): Promise<void>;
   }
 }

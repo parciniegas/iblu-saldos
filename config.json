@@ -10,7 +10,7 @@
     "batchSizeDefault": 1000
   },
   "rabbitMq": {
-    "hostName": "localhost",
+    "hostName": "docker",
     "port": 5672,
     "userName": "admin",
     "password": "P2ssw0rd",

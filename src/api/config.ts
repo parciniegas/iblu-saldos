@@ -1,6 +1,6 @@
-import fs from 'fs';
-import { fileURLToPath } from 'url';
-import path from 'path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -41,15 +41,18 @@ function getEnv(name: string, fallback: string): string {
 function getEnvInt(name: string, fallback: number): number {
   const val = process.env[name];
   if (val === undefined) return fallback;
-  const parsed = parseInt(val, 10);
-  return isNaN(parsed) ? fallback : parsed;
+  const parsed = Number.parseInt(val, 10);
+  return Number.isNaN(parsed) ? fallback : parsed;
 }
 function loadConfigFile(): AppConfig {
   const configPath = path.resolve(__dirname, '../../config.json');
   try {
     const raw = fs.readFileSync(configPath, 'utf-8');
     return JSON.parse(raw) as AppConfig;
-  } catch {
+  } catch (error) {
+    console.warn(
+      `No se pudo cargar config.json (${error instanceof Error ? error.message : String(error)}). Usando configuración por defecto.`,
+    );
     return getDefaultConfig();
   }
 }

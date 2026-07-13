@@ -1,5 +1,4 @@
-import * as amqp from 'amqp10';
-import { Client, type AmqpMessage, type Receiver, type Sender, type Session } from 'amqp10';
+import { Client, type AmqpMessage, type Receiver, type Sender } from 'amqp10';
 import pino from 'pino';
 
 export type RabbitMqSettings = {
@@ -34,7 +33,6 @@ export interface IRabbitMqService {
 
 export class RabbitMqServiceImpl implements IRabbitMqService {
   private client: Client | null = null;
-  private session: Session | null = null;
   private sender: Sender | null = null;
   private receiver: Receiver | null = null;
   private logger: pino.Logger | null = null;
@@ -71,40 +69,6 @@ export class RabbitMqServiceImpl implements IRabbitMqService {
     resolve();
   }
 
-  private onSessionCreated(session: Session, resolve: () => void): void {
-    this.session = session;
-
-    session.once('senderCreated', (sender: Sender) => {
-      this.onSenderCreated(sender);
-    });
-
-    session.once('receiverCreated', (receiver: Receiver) => {
-      this.onReceiverCreated(receiver, resolve);
-    });
-
-    session.createSender();
-    session.createReceiver(this.settings.queueName);
-  }
-
-  private onConnected(resolve: () => void): void {
-    this.logger?.info({ queueName: this.settings.queueName }, 'RabbitMQ conectado');
-    this.stats.successfulConnections += 1;
-    this.stats.lastConnectedAt = new Date().toISOString();
-
-    this.client!.once('sessionCreated', (session: Session) => {
-      this.onSessionCreated(session, resolve);
-    });
-
-    this.client!.createSession({
-      settleSelfAck: true,
-    }, { autoAttach: true });
-  }
-
-  private onConnectionError(err: Error, reject: (reason?: unknown) => void): void {
-    this.logger?.error({ error: err.message }, 'Error de conexión RabbitMQ');
-    reject(err);
-  }
-
   private onDisconnected(): void {
     this.logger?.warn('Desconectado de RabbitMQ, reintentando...');
     this.stats.disconnectEvents += 1;
@@ -115,20 +79,28 @@ export class RabbitMqServiceImpl implements IRabbitMqService {
     this.stats.connectAttempts += 1;
 
     try {
-      this.client = new Client(amqp.Transport.tls(), this.getConnectionString());
+      this.client = new Client();
 
-      await new Promise<void>((resolve, reject) => {
-        this.client!.on('connected', () => {
-          this.onConnected(resolve);
-        });
+      this.client.on('client:errorReceived', (err: Error) => {
+        this.logger?.error({ error: err.message }, 'Error de conexión RabbitMQ');
+      });
 
-        this.client!.on('error', (err: Error) => {
-          this.onConnectionError(err, reject);
-        });
+      this.client.on('disconnected', () => {
+        this.onDisconnected();
+      });
 
-        this.client!.on('disconnected', () => {
-          this.onDisconnected();
-        });
+      await this.client.connect(this.getConnectionString());
+
+      this.stats.successfulConnections += 1;
+      this.stats.lastConnectedAt = new Date().toISOString();
+      this.logger?.info({ queueName: this.settings.queueName }, 'RabbitMQ conectado');
+
+      const sender = await this.client.createSender(this.settings.queueName);
+      this.onSenderCreated(sender);
+
+      const receiver = await this.client.createReceiver(this.settings.queueName);
+      await new Promise<void>((resolve) => {
+        this.onReceiverCreated(receiver, resolve);
       });
     } catch (error) {
       this.logger?.error({ error: error instanceof Error ? error.message : String(error) }, 'Error conectando a RabbitMQ');
@@ -159,32 +131,26 @@ export class RabbitMqServiceImpl implements IRabbitMqService {
     }
 
     const address = queueName || this.settings.queueName;
-    const payload = Buffer.from(JSON.stringify(message));
-
-    const tag = Buffer.alloc(8);
-    tag.writeBigInt64BE(BigInt(Date.now()));
-
-    const delivery = {
-      tag,
-      payload,
-    };
-
     return new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.stats.publishTimeouts += 1;
         reject(new Error('Timeout publicando mensaje'));
       }, 5000);
 
-      sender.send(delivery, (err: Error | null, _deliveryResult: unknown) => {
+      sender.send(JSON.stringify(message)).then(() => {
         clearTimeout(timeout);
-        if (err) {
+        this.stats.publishedCount += 1;
+        this.logger?.debug({ queue: address }, 'Mensaje publicado a RabbitMQ');
+        resolve();
+      }).catch((err: unknown) => {
+        clearTimeout(timeout);
+        if (err instanceof Error) {
           this.stats.publishErrors += 1;
           this.logger?.error({ error: err.message }, 'Error publicando mensaje');
           reject(err);
         } else {
-          this.stats.publishedCount += 1;
-          this.logger?.debug({ queue: address }, 'Mensaje publicado a RabbitMQ');
-          resolve();
+          this.stats.publishErrors += 1;
+          reject(new Error(String(err)));
         }
       });
     });
@@ -199,19 +165,19 @@ export class RabbitMqServiceImpl implements IRabbitMqService {
       try {
         this.stats.consumedCount += 1;
         const body = message.body;
-        const text = body instanceof Buffer ? body.toString('utf-8') : String(body);
-        const parsed = JSON.parse(text);
+        const payload = body instanceof Buffer ? body.toString('utf-8') : body;
+        const parsed = typeof payload === 'string' ? JSON.parse(payload) : payload;
 
         await handler(parsed);
 
         if (this.receiver) {
-          this.receiver.ack(message);
+          this.receiver.accept(message);
         }
       } catch (error) {
         this.stats.consumeErrors += 1;
         this.logger?.error({ error: error instanceof Error ? error.message : String(error) }, 'Error procesando mensaje');
         if (this.receiver) {
-          this.receiver.ack(message);
+          this.receiver.accept(message);
         }
       }
     });
@@ -228,11 +194,8 @@ export class RabbitMqServiceImpl implements IRabbitMqService {
     }
 
     try {
-      if (this.session) {
-        await this.session.close();
-      }
       if (this.client) {
-        await this.client.close();
+        await this.client.disconnect();
       }
     } catch {
       // Ignore errors on close
