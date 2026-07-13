@@ -1,9 +1,12 @@
 import { prisma } from './PrismaService.js';
-import type { Prisma, SaldoContable as PrismaSaldoContable } from '@prisma/client';
+import { Prisma, type SaldoContable as PrismaSaldoContable } from '@prisma/client';
 import type { ISaldoContableRepository } from '../../application/abstractions/ISaldoContableRepository.js';
 import type { SaldoContableKey } from '../../application/contracts/SaldoContableKey.js';
 import type { SaldoContableUpdateValues } from '../../application/contracts/SaldoContableUpdateValues.js';
 import type { SaldoContable } from '../../domain/entities/SaldoContable.js';
+
+const BULK_UPDATE_CHUNK_SIZE = 500;
+const BULK_UPDATE_CHUNK_SIZE_ENV = 'SALDOS_BULK_UPDATE_CHUNK_SIZE';
 
 export class SaldoContableRepository implements ISaldoContableRepository {
   async getByKey(key: SaldoContableKey): Promise<SaldoContable | null> {
@@ -55,47 +58,103 @@ export class SaldoContableRepository implements ISaldoContableRepository {
   async bulkUpdate(saldos: SaldoContable[]): Promise<void> {
     const now = new Date();
 
-    const creates = saldos.filter((s) => s.id === 0).map((saldo) => ({
-      data: {
-        periodoId: saldo.periodoId,
-        class: saldo.class ?? undefined,
-        entidadId: saldo.entidadId,
-        terceroId: saldo.terceroId,
-        cuentaContableId: saldo.cuentaContableId,
-        centroCostoId: saldo.centroCostoId,
-        saldoInicialDebito: saldo.saldoInicialDebito,
-        saldoInicialCredito: saldo.saldoInicialCredito,
-        debito: saldo.debito,
-        credito: saldo.credito,
-        saldoFinalDebito: saldo.saldoFinalDebito,
-        saldoFinalCredito: saldo.saldoFinalCredito,
-        libroContableId: saldo.libroContableId,
-        unidadNegocioId: saldo.unidadNegocioId,
-        centroOperacionId: saldo.centroOperacionId,
-        categorizacionId: saldo.categorizacionId,
-        cierre: saldo.cierre,
-        modeloCarteraId: saldo.modeloCarteraId,
-        modeloCartera: saldo.modeloCartera,
-        conceptoTributarioId: saldo.conceptoTributarioId,
-      },
+    const creates = saldos.filter((s) => s.id === 0).map((saldo): Prisma.SaldoContableCreateManyInput => ({
+      periodoId: saldo.periodoId,
+      class: saldo.class ?? null,
+      entidadId: saldo.entidadId,
+      terceroId: saldo.terceroId,
+      cuentaContableId: saldo.cuentaContableId,
+      centroCostoId: saldo.centroCostoId,
+      saldoInicialDebito: saldo.saldoInicialDebito,
+      saldoInicialCredito: saldo.saldoInicialCredito,
+      debito: saldo.debito,
+      credito: saldo.credito,
+      saldoFinalDebito: saldo.saldoFinalDebito,
+      saldoFinalCredito: saldo.saldoFinalCredito,
+      libroContableId: saldo.libroContableId,
+      unidadNegocioId: saldo.unidadNegocioId,
+      centroOperacionId: saldo.centroOperacionId,
+      categorizacionId: saldo.categorizacionId,
+      cierre: saldo.cierre,
+      modeloCarteraId: saldo.modeloCarteraId,
+      modeloCartera: saldo.modeloCartera,
+      conceptoTributarioId: saldo.conceptoTributarioId,
+      createdAt: now,
+      updatedAt: now,
     }));
 
-    const updates = saldos.filter((s) => s.id !== 0).map((saldo) => ({
-      where: { id: saldo.id },
-      data: { updatedAt: now },
-    }));
+    const existing = saldos.filter((s) => s.id !== 0);
 
-    const operations: Prisma.PrismaPromise<unknown>[] = [];
-    for (const create of creates) {
-      operations.push(prisma.saldoContable.create(create));
-    }
-    for (const update of updates) {
-      operations.push(prisma.saldoContable.update(update));
+    if (creates.length > 0) {
+      await prisma.saldoContable.createMany({ data: creates });
     }
 
-    if (operations.length > 0) {
-      await prisma.$transaction(operations);
+    if (existing.length > 0) {
+      const chunkSize = this.getBulkUpdateChunkSize();
+      for (let i = 0; i < existing.length; i += chunkSize) {
+        const chunk = existing.slice(i, i + chunkSize);
+        await this.bulkUpdateByIdChunk(chunk, now);
+      }
     }
+  }
+
+  private getBulkUpdateChunkSize(): number {
+    const value = Number.parseInt(process.env[BULK_UPDATE_CHUNK_SIZE_ENV] ?? '', 10);
+    if (Number.isNaN(value) || value <= 0) return BULK_UPDATE_CHUNK_SIZE;
+    return value;
+  }
+
+  private async bulkUpdateByIdChunk(saldos: SaldoContable[], now: Date): Promise<void> {
+    const ids = saldos.map((saldo) => saldo.id);
+
+    const saldoInicialDebitoCases = Prisma.join(
+      saldos.map((saldo) => Prisma.sql`WHEN ${saldo.id} THEN ${saldo.saldoInicialDebito}`),
+      ' ',
+    );
+
+    const saldoInicialCreditoCases = Prisma.join(
+      saldos.map((saldo) => Prisma.sql`WHEN ${saldo.id} THEN ${saldo.saldoInicialCredito}`),
+      ' ',
+    );
+
+    const debitoCases = Prisma.join(
+      saldos.map((saldo) => Prisma.sql`WHEN ${saldo.id} THEN ${saldo.debito}`),
+      ' ',
+    );
+
+    const creditoCases = Prisma.join(
+      saldos.map((saldo) => Prisma.sql`WHEN ${saldo.id} THEN ${saldo.credito}`),
+      ' ',
+    );
+
+    const saldoFinalDebitoCases = Prisma.join(
+      saldos.map((saldo) => Prisma.sql`WHEN ${saldo.id} THEN ${saldo.saldoFinalDebito}`),
+      ' ',
+    );
+
+    const saldoFinalCreditoCases = Prisma.join(
+      saldos.map((saldo) => Prisma.sql`WHEN ${saldo.id} THEN ${saldo.saldoFinalCredito}`),
+      ' ',
+    );
+
+    const cierreCases = Prisma.join(
+      saldos.map((saldo) => Prisma.sql`WHEN ${saldo.id} THEN ${saldo.cierre}`),
+      ' ',
+    );
+
+    await prisma.$executeRaw`
+      UPDATE saldos_contables
+      SET
+        saldoinicialdebito = CASE id ${saldoInicialDebitoCases} ELSE saldoinicialdebito END,
+        saldoinicialcredito = CASE id ${saldoInicialCreditoCases} ELSE saldoinicialcredito END,
+        debito = CASE id ${debitoCases} ELSE debito END,
+        credito = CASE id ${creditoCases} ELSE credito END,
+        saldofinaldebito = CASE id ${saldoFinalDebitoCases} ELSE saldofinaldebito END,
+        saldofinalcredito = CASE id ${saldoFinalCreditoCases} ELSE saldofinalcredito END,
+        cierre = CASE id ${cierreCases} ELSE cierre END,
+        updated_at = ${now}
+      WHERE id IN (${Prisma.join(ids)})
+    `;
   }
 
   private toDomain(saldo: PrismaSaldoContable): SaldoContable {

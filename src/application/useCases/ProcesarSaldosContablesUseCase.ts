@@ -26,6 +26,18 @@ type PeriodProcessingResult = {
   totalPeriodCuentas: number;
 };
 
+type SaldoUpdatePayload = {
+  key: SaldoContableKey;
+  values: {
+    SaldoInicialDebito: number;
+    SaldoInicialCredito: number;
+    Debito: number;
+    Credito: number;
+    SaldoFinalDebito: number;
+    SaldoFinalCredito: number;
+  };
+};
+
 export class ProcesarSaldosContablesUseCase {
   constructor(
     private readonly movimientoRepo: IMovimientoContableRepository,
@@ -53,7 +65,7 @@ export class ProcesarSaldosContablesUseCase {
       this.logger.info({ jobId, periodosCount: periodos.length }, '[SALDOS] Periodos encontrados');
       const priorPeriodById = this.buildPriorPeriodMap(periodos);
 
-      const periodTimes: number[] = [];
+      let periodTimesTotal = 0;
 
       for (const periodoId of periodos) {
         const periodoStart = Date.now();
@@ -64,12 +76,12 @@ export class ProcesarSaldosContablesUseCase {
         );
 
         const periodoTiempo = Date.now() - periodoStart;
-        periodTimes.push(periodoTiempo);
+        periodTimesTotal += periodoTiempo;
         periodosProcesados++;
         totalMovimientosProcesados += totalPeriodMovimientos;
         totalMovimientosCuentaProcesados += totalPeriodCuentas;
 
-        const promedioMs = periodTimes.reduce((a, b) => a + b, 0) / periodTimes.length;
+        const promedioMs = periodTimesTotal / periodosProcesados;
         const periodosRestantes = periodos.length - periodosProcesados;
         const etaMs = periodosRestantes * promedioMs;
         const eta = this.formatMs(etaMs);
@@ -147,9 +159,7 @@ export class ProcesarSaldosContablesUseCase {
     batchSize: number,
     priorPeriodId: number | null,
   ): Promise<PeriodProcessingResult> {
-    await this.zeroInitializePeriod(periodoId, batchSize);
-
-    const saldosDelPeriodo = await this.saldoRepo.getByPeriodo(periodoId);
+    const saldosDelPeriodo = await this.zeroInitializePeriod(periodoId, batchSize);
     const saldosByKey = new Map<string, SaldoContable>();
 
     for (const saldo of saldosDelPeriodo) {
@@ -168,8 +178,12 @@ export class ProcesarSaldosContablesUseCase {
       batch = await this.movimientoRepo.getBatchByPeriodo(periodoId, batchSize, lastId);
       if (batch.length === 0) break;
 
+      this.logger.debug({ periodoId, batchSize: batch.length, lastId }, '[SALDOS] Batch obtenido');
+
       const movimientoIds = batch.map((m) => m.id);
       const cuentasAgrupadas = await this.movimientoRepo.getCuentasAgrupadasPorMovimientos(movimientoIds);
+
+      this.logger.debug({ periodoId, cuentasAgrupadas: cuentasAgrupadas.length }, '[SALDOS] Cuentas agrupadas procesadas');
 
       for (const cuenta of cuentasAgrupadas) {
         const saldoKey = this.buildSaldoKey(
@@ -192,14 +206,12 @@ export class ProcesarSaldosContablesUseCase {
 
       totalPeriodMovimientos += batch.length;
       lastId = batch.at(-1)!.id;
+      
+      this.logger.debug({ periodoId, totalPeriodMovimientos, totalPeriodCuentas }, '[SALDOS] Batch procesado completamente');
     } while (batch.length >= batchSize);
 
     const saldosActualizados = Array.from(saldosByKey.values());
-    if (saldosActualizados.length > 0) {
-      await this.saldoRepo.bulkUpdate(saldosActualizados);
-    }
-
-    await this.computePeriodSaldos(periodoId, totalPeriodCuentas, priorPeriodId);
+    await this.computePeriodSaldos(periodoId, saldosActualizados, totalPeriodCuentas, priorPeriodId);
 
     return {
       totalPeriodMovimientos,
@@ -207,69 +219,129 @@ export class ProcesarSaldosContablesUseCase {
     };
   }
 
-  private async zeroInitializePeriod(periodoId: number, batchSize: number): Promise<void> {
+  private async zeroInitializePeriod(periodoId: number, batchSize: number): Promise<SaldoContable[]> {
     const saldos = await this.saldoRepo.getByPeriodo(periodoId);
+    this.logger.debug({ periodoId, totalSaldos: saldos.length, batchSize }, '[SALDOS] Iniciando zeroInitializePeriod');
 
-    for (let i = 0; i < saldos.length; i += batchSize) {
-      const batch = saldos.slice(i, i + batchSize);
-      for (const saldo of batch) {
-        await this.saldoRepo.updateByKey(
-          { PeriodoId: saldo.periodoId, TerceroId: saldo.terceroId, CuentaContableId: saldo.cuentaContableId, CentroCostoId: saldo.centroCostoId },
-          {
-            SaldoInicialDebito: 0,
-            SaldoInicialCredito: 0,
-            Debito: 0,
-            Credito: 0,
-            SaldoFinalDebito: 0,
-            SaldoFinalCredito: 0,
-          },
-        );
+    for (const saldo of saldos) {
+      saldo.saldoInicialDebito = 0;
+      saldo.saldoInicialCredito = 0;
+      saldo.debito = 0;
+      saldo.credito = 0;
+      saldo.saldoFinalDebito = 0;
+      saldo.saldoFinalCredito = 0;
+    }
+
+    if (saldos.length > 0) {
+      await this.saldoRepo.bulkUpdate(saldos);
+    }
+
+    return saldos;
+  }
+
+  private async computePeriodSaldos(
+    periodoId: number,
+    saldos: SaldoContable[],
+    cuentasProcesadas: number,
+    priorPeriodId: number | null,
+  ): Promise<void> {
+    if (cuentasProcesadas === 0) return;
+
+    this.logger.debug({ periodoId, cuentasProcesadas, saldosCount: saldos.length }, '[SALDOS] Iniciando computePeriodSaldos');
+
+    const priorSaldosByKey = await this.buildPriorSaldosByKey(priorPeriodId);
+    const pendingUpdates: SaldoUpdatePayload[] = [];
+    const saldosByKey = new Map<string, SaldoContable>();
+
+    for (const saldo of saldos) {
+      saldosByKey.set(this.buildSaldoKey(periodoId, saldo.terceroId, saldo.cuentaContableId, saldo.centroCostoId), saldo);
+    }
+
+    for (let saldoIndex = 0; saldoIndex < saldos.length; saldoIndex++) {
+      const saldo = saldos[saldoIndex];
+      if (!saldo) continue;
+
+      if (saldoIndex > 0 && saldoIndex % 1000 === 0) {
+        this.logger.debug({ periodoId, procesados: saldoIndex, total: saldos.length }, '[SALDOS] computePeriodSaldos en progreso');
       }
+      pendingUpdates.push(this.buildSaldoUpdate(periodoId, saldo, priorPeriodId, priorSaldosByKey));
+    }
+
+    for (const update of pendingUpdates) {
+      const saldo = saldosByKey.get(this.buildSaldoKey(
+        update.key.PeriodoId,
+        update.key.TerceroId,
+        update.key.CuentaContableId,
+        update.key.CentroCostoId,
+      ));
+      if (!saldo) continue;
+
+      saldo.saldoInicialDebito = update.values.SaldoInicialDebito;
+      saldo.saldoInicialCredito = update.values.SaldoInicialCredito;
+      saldo.debito = update.values.Debito;
+      saldo.credito = update.values.Credito;
+      saldo.saldoFinalDebito = update.values.SaldoFinalDebito;
+      saldo.saldoFinalCredito = update.values.SaldoFinalCredito;
+    }
+
+    if (saldos.length > 0) {
+      await this.saldoRepo.bulkUpdate(saldos);
     }
   }
 
-  private async computePeriodSaldos(periodoId: number, cuentasProcesadas: number, priorPeriodId: number | null): Promise<void> {
-    if (cuentasProcesadas === 0) return;
+  private async buildPriorSaldosByKey(priorPeriodId: number | null): Promise<Map<string, SaldoContable>> {
+    const priorSaldosByKey = new Map<string, SaldoContable>();
+    if (priorPeriodId === null) return priorSaldosByKey;
 
-    const saldos = await this.saldoRepo.getByPeriodo(periodoId);
+    const priorSaldos = await this.saldoRepo.getByPeriodo(priorPeriodId);
+    for (const priorSaldo of priorSaldos) {
+      priorSaldosByKey.set(
+        this.buildSaldoKey(priorPeriodId, priorSaldo.terceroId, priorSaldo.cuentaContableId, priorSaldo.centroCostoId),
+        priorSaldo,
+      );
+    }
 
-    for (const saldo of saldos) {
-      const key: SaldoContableKey = {
-        PeriodoId: periodoId,
-        TerceroId: saldo.terceroId,
-        CuentaContableId: saldo.cuentaContableId,
-        CentroCostoId: saldo.centroCostoId,
-      };
+    return priorSaldosByKey;
+  }
 
-      let saldoInicialDebito: number = 0;
-      let saldoInicialCredito: number = 0;
+  private buildSaldoUpdate(
+    periodoId: number,
+    saldo: SaldoContable,
+    priorPeriodId: number | null,
+    priorSaldosByKey: Map<string, SaldoContable>,
+  ): SaldoUpdatePayload {
+    const key: SaldoContableKey = {
+      PeriodoId: periodoId,
+      TerceroId: saldo.terceroId,
+      CuentaContableId: saldo.cuentaContableId,
+      CentroCostoId: saldo.centroCostoId,
+    };
 
-      if (priorPeriodId !== null) {
-        const priorSaldo = await this.saldoRepo.getByKey({
-          PeriodoId: priorPeriodId,
-          TerceroId: saldo.terceroId,
-          CuentaContableId: saldo.cuentaContableId,
-          CentroCostoId: saldo.centroCostoId,
-        });
+    const priorSaldo = priorPeriodId === null
+      ? undefined
+      : priorSaldosByKey.get(this.buildSaldoKey(
+        priorPeriodId,
+        saldo.terceroId,
+        saldo.cuentaContableId,
+        saldo.centroCostoId,
+      ));
 
-        if (priorSaldo) {
-          saldoInicialDebito = priorSaldo.saldoFinalDebito;
-          saldoInicialCredito = priorSaldo.saldoFinalCredito;
-        }
-      }
+    const saldoInicialDebito = priorSaldo?.saldoFinalDebito ?? 0;
+    const saldoInicialCredito = priorSaldo?.saldoFinalCredito ?? 0;
+    const saldoFinalDebito = saldoInicialDebito + saldo.debito;
+    const saldoFinalCredito = saldoInicialCredito + saldo.credito;
 
-      const saldoFinalDebito = saldoInicialDebito + saldo.debito;
-      const saldoFinalCredito = saldoInicialCredito + saldo.credito;
-
-      await this.saldoRepo.updateByKey(key, {
+    return {
+      key,
+      values: {
         SaldoInicialDebito: saldoInicialDebito,
         SaldoInicialCredito: saldoInicialCredito,
         Debito: saldo.debito,
         Credito: saldo.credito,
         SaldoFinalDebito: saldoFinalDebito,
         SaldoFinalCredito: saldoFinalCredito,
-      });
-    }
+      },
+    };
   }
 
   private buildSaldoKey(periodoId: number, terceroId?: number, cuentaContableId?: number, centroCostoId?: number): string {
