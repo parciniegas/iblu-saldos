@@ -35,7 +35,27 @@ export function registerSaldosRoutes(app: FastifyInstance): void {
   };
 
   // GET /api/v1/saldos/jobs
-  app.get<{ Querystring: { status?: string; limit?: string } }>('/api/v1/saldos/jobs', async (request) => {
+  app.get<{ Querystring: { status?: string; limit?: string } }>('/api/v1/saldos/jobs', {
+    schema: {
+      tags: ['Saldos'],
+      security: [{ apiKey: [] }],
+      summary: 'Listar jobs',
+      description: 'Lista jobs de procesamiento con filtros opcionales por estado y límite.',
+      querystring: {
+        type: 'object',
+        properties: {
+          status: { type: 'string', enum: ['pending', 'processing', 'completed', 'failed'] },
+          limit: { type: 'string' },
+        },
+      },
+      response: {
+        200: {
+          type: 'array',
+          items: { type: 'object', additionalProperties: true },
+        },
+      },
+    },
+  }, async (request) => {
     const { status, limit } = request.query;
 
     const jobs = jobService.listJobs({
@@ -47,7 +67,26 @@ export function registerSaldosRoutes(app: FastifyInstance): void {
   });
 
   // GET /api/v1/saldos/jobs/metrics
-  app.get('/api/v1/saldos/jobs/metrics', async () => {
+  app.get('/api/v1/saldos/jobs/metrics', {
+    schema: {
+      tags: ['Saldos'],
+      security: [{ apiKey: [] }],
+      summary: 'Métricas de jobs',
+      description: 'Retorna conteo total de jobs por estado.',
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            total: { type: 'number' },
+            pending: { type: 'number' },
+            processing: { type: 'number' },
+            completed: { type: 'number' },
+            failed: { type: 'number' },
+          },
+        },
+      },
+    },
+  }, async () => {
     const all = jobService.listJobs({ limit: 10000 });
     const metrics = {
       total: all.length,
@@ -65,7 +104,30 @@ export function registerSaldosRoutes(app: FastifyInstance): void {
   });
 
   // GET /api/v1/saldos/status/:jobId
-  app.get<{ Params: { jobId: string } }>('/api/v1/saldos/status/:jobId', async (request, reply) => {
+  app.get<{ Params: { jobId: string } }>('/api/v1/saldos/status/:jobId', {
+    schema: {
+      tags: ['Saldos'],
+      security: [{ apiKey: [] }],
+      summary: 'Consultar estado de job',
+      params: {
+        type: 'object',
+        required: ['jobId'],
+        properties: {
+          jobId: { type: 'string' },
+        },
+      },
+      response: {
+        200: { type: 'object', additionalProperties: true },
+        404: {
+          type: 'object',
+          properties: {
+            error: { type: 'string' },
+            jobId: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
     const { jobId } = request.params;
 
     const job = jobService.getJob(jobId);
@@ -78,7 +140,26 @@ export function registerSaldosRoutes(app: FastifyInstance): void {
   });
 
   // POST /api/v1/saldos/preview
-  app.post<{ Body: { fechaDesde: string; batchSize?: number } }>('/api/v1/saldos/preview', async (request, reply) => {
+  app.post<{ Body: { fechaDesde: string; batchSize?: number } }>('/api/v1/saldos/preview', {
+    schema: {
+      tags: ['Saldos'],
+      security: [{ apiKey: [] }],
+      summary: 'Previsualizar procesamiento',
+      body: {
+        type: 'object',
+        required: ['fechaDesde'],
+        properties: {
+          fechaDesde: { type: 'string', format: 'date' },
+          batchSize: { type: 'integer', minimum: 1 },
+        },
+      },
+      response: {
+        200: { type: 'object', additionalProperties: true },
+        400: { type: 'object', additionalProperties: true },
+        503: { type: 'object', additionalProperties: true },
+      },
+    },
+  }, async (request, reply) => {
     try {
       const parsed = previewSchema.safeParse(request.body);
 
@@ -117,7 +198,34 @@ export function registerSaldosRoutes(app: FastifyInstance): void {
   });
 
   // POST /api/v1/saldos/procesar
-  app.post<{ Body: { fechaDesde: string; batchSize?: number } }>('/api/v1/saldos/procesar', async (request, reply) => {
+  app.post<{ Body: { fechaDesde: string; batchSize?: number } }>('/api/v1/saldos/procesar', {
+    schema: {
+      tags: ['Saldos'],
+      security: [{ apiKey: [] }],
+      summary: 'Iniciar procesamiento en background',
+      body: {
+        type: 'object',
+        required: ['fechaDesde'],
+        properties: {
+          fechaDesde: { type: 'string', format: 'date' },
+          batchSize: { type: 'integer', minimum: 1 },
+        },
+      },
+      response: {
+        202: {
+          type: 'object',
+          properties: {
+            jobId: { type: 'string' },
+            status: { type: 'string' },
+            fechaDesde: { type: 'string' },
+            batchSize: { type: 'number' },
+          },
+        },
+        400: { type: 'object', additionalProperties: true },
+        503: { type: 'object', additionalProperties: true },
+      },
+    },
+  }, async (request, reply) => {
     try {
       const parsed = procesarSchema.safeParse(request.body);
 
@@ -193,7 +301,26 @@ export function registerSaldosRoutes(app: FastifyInstance): void {
   });
 
   // POST /api/v1/saldos/queue
-  app.post<{ Body: { fechaDesde: string; batchSize: number } }>('/api/v1/saldos/queue', async (request, reply) => {
+  app.post<{ Body: { fechaDesde: string; batchSize: number } }>('/api/v1/saldos/queue', {
+    schema: {
+      tags: ['Saldos'],
+      security: [{ apiKey: [] }],
+      summary: 'Publicar procesamiento en cola',
+      body: {
+        type: 'object',
+        required: ['fechaDesde'],
+        properties: {
+          fechaDesde: { type: 'string', format: 'date' },
+          batchSize: { type: 'integer', minimum: 1 },
+        },
+      },
+      response: {
+        200: { type: 'object', additionalProperties: true },
+        400: { type: 'object', additionalProperties: true },
+        503: { type: 'object', additionalProperties: true },
+      },
+    },
+  }, async (request, reply) => {
     try {
       const parsed = procesarSchema.safeParse(request.body);
 

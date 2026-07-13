@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyCors from '@fastify/cors';
 import fastifySwagger from '@fastify/swagger';
+import fastifySwaggerUi from '@fastify/swagger-ui';
 import pino from 'pino';
 import { loadConfig } from './config.js';
 import { connectPrisma, prisma, setPrismaLogger } from '../infrastructure/persistence/PrismaService.js';
@@ -48,12 +49,30 @@ async function start(): Promise<FastifyInstance> {
         description: 'API para procesamiento de saldos contables',
         version: '1.0.0',
       },
+      tags: [
+        { name: 'Health', description: 'Estado operativo del servicio' },
+        { name: 'Saldos', description: 'Procesamiento y administración de saldos contables' },
+      ],
+      components: {
+        securitySchemes: {
+          apiKey: {
+            type: 'apiKey',
+            name: 'x-api-key',
+            in: 'header',
+          },
+        },
+      },
       servers: [{ url: 'http://localhost:3000', description: 'Local' }],
       externalDocs: {
         url: 'https://github.com/your-org/saldos-node',
         description: 'Documentación',
       },
     },
+  });
+
+  await app.register(fastifySwaggerUi, {
+    routePrefix: '/documentation',
+    staticCSP: true,
   });
 
   try {

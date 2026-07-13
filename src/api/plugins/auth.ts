@@ -3,8 +3,13 @@ import { loadConfig, type AppConfig } from '../config.js';
 
 export async function registerAuthPlugin(app: FastifyInstance): Promise<void> {
   const config: AppConfig = loadConfig();
+  const publicPrefixes = ['/health', '/documentation'];
 
   app.addHook('onRequest', async (request, reply) => {
+    if (publicPrefixes.some((prefix) => request.url.startsWith(prefix))) {
+      return;
+    }
+
     const apiKey = request.headers['x-api-key'] as string | undefined;
 
     if (!apiKey) {

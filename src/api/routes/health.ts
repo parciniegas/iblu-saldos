@@ -2,11 +2,44 @@ import { type FastifyInstance } from 'fastify';
 import type { RabbitMqRuntimeStats } from '../../infrastructure/messaging/RabbitMqService.js';
 
 export function registerHealthRoutes(app: FastifyInstance): void {
-  app.get('/health', async () => {
+  app.get('/health', {
+    schema: {
+      tags: ['Health'],
+      summary: 'Health básico',
+      description: 'Verifica disponibilidad del servicio API.',
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            status: { type: 'string' },
+            timestamp: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async () => {
     return { status: 'ok', timestamp: new Date().toISOString() };
   });
 
-  app.get('/health/detailed', async () => {
+  app.get('/health/detailed', {
+    schema: {
+      tags: ['Health'],
+      summary: 'Health detallado',
+      description: 'Incluye estado de base de datos y telemetría básica de RabbitMQ.',
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            status: { type: 'string' },
+            database: { type: 'string' },
+            rabbitMq: { type: 'string' },
+            rabbitMqStats: { type: 'object', additionalProperties: true },
+            timestamp: { type: 'string' },
+          },
+        },
+      },
+    },
+  }, async () => {
     const result: { status: string; database?: string; rabbitMq?: string; rabbitMqStats?: RabbitMqRuntimeStats; timestamp: string } = {
       status: 'ok',
       timestamp: new Date().toISOString(),
@@ -32,7 +65,22 @@ export function registerHealthRoutes(app: FastifyInstance): void {
     return result;
   });
 
-  app.get('/health/metrics', async () => {
+  app.get('/health/metrics', {
+    schema: {
+      tags: ['Health'],
+      summary: 'Métricas operativas',
+      description: 'Retorna métricas agregadas de RabbitMQ observadas por el API.',
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            timestamp: { type: 'string' },
+            rabbitMq: { type: ['object', 'null'], additionalProperties: true },
+          },
+        },
+      },
+    },
+  }, async () => {
     return {
       timestamp: new Date().toISOString(),
       rabbitMq: app.rabbitMqService?.getStats() ?? null,

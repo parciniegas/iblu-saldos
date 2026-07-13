@@ -103,7 +103,7 @@ export class SaldoContableRepository implements ISaldoContableRepository {
       id: Number(saldo.id),
       periodoId: Number(saldo.periodoId),
       class: undefined,
-      entidadId: saldo.entidadId ?? undefined,
+      entidadId: saldo.entidadId != null ? Number(saldo.entidadId) : undefined,
       terceroId: saldo.terceroId != null ? Number(saldo.terceroId) : undefined,
       cuentaContableId: saldo.cuentaContableId != null ? Number(saldo.cuentaContableId) : undefined,
       centroCostoId: saldo.centroCostoId != null ? Number(saldo.centroCostoId) : undefined,

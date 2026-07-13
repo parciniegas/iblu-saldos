@@ -3,7 +3,7 @@
     "mariaDb": "mysql://pad:P2ssw0rd!d@docker:3306/cuentas"
   },
   "apiKeys": {
-    "allowedKeys": []
+    "allowedKeys": ["1234567890abcdef", "abcdef1234567890"]
   },
   "procesamientoMovimientos": {
     "fechaDesdeDefault": "2000-01-01",
