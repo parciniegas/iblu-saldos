@@ -17,8 +17,7 @@ try {
     connectionString: { mariaDb: '' },
     apiKeys: { allowedKeys: [] },
     procesamientoMovimientos: { fechaDesdeDefault: '2000-01-01', batchSizeDefault: 1000 },
-    rabbitMq: { hostName: 'localhost', port: 5672, userName: 'admin', password: '', virtualHost: '/', queueName: 'saldos' },
-    logging: { level: 'info', filePath: 'logs/saldos-worker-.json', rollingInterval: 'day' },
+    logging: { level: 'info', filePath: 'logs/saldos-api-.json', rollingInterval: 'day' },
     server: { port: 3000, host: '0.0.0.0' },
   };
 }

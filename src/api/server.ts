@@ -7,7 +7,6 @@ import { loadConfig } from './config.js';
 import { connectPrisma, prisma, setPrismaLogger } from '../infrastructure/persistence/PrismaService.js';
 import { MovimientoContableRepository } from '../infrastructure/persistence/MovimientoContableRepository.js';
 import { SaldoContableRepository } from '../infrastructure/persistence/SaldoContableRepository.js';
-import { RabbitMqServiceImpl, type RabbitMqSettings } from '../infrastructure/messaging/RabbitMqService.js';
 import { ProcesarSaldosContablesUseCase } from '../application/useCases/ProcesarSaldosContablesUseCase.js';
 import { registerSaldosRoutes } from './routes/saldos.js';
 import { registerHealthRoutes } from './routes/health.js';
@@ -84,16 +83,6 @@ async function start(): Promise<FastifyInstance> {
   const movimientoRepo = new MovimientoContableRepository();
   const saldoRepo = new SaldoContableRepository();
   const useCase = new ProcesarSaldosContablesUseCase(movimientoRepo, saldoRepo, prismaLogger);
-  const rabbitSettings: RabbitMqSettings = config.rabbitMq;
-  const rabbitMqService = new RabbitMqServiceImpl(rabbitSettings);
-  rabbitMqService.setLogger(prismaLogger);
-
-  try {
-    await rabbitMqService.connect();
-    app.decorate('rabbitMqService', rabbitMqService);
-  } catch (error) {
-    prismaLogger.warn({ error: error instanceof Error ? error.message : String(error) }, 'RabbitMQ no disponible, ruta /queue degradada');
-  }
 
   app.decorate('movimientoRepo', movimientoRepo);
   app.decorate('saldoRepo', saldoRepo);
@@ -101,10 +90,6 @@ async function start(): Promise<FastifyInstance> {
   app.decorate('config', config);
   app.decorate('logger', prismaLogger);
   app.decorate('prismaClient', prisma);
-
-  app.addHook('onClose', async () => {
-    await rabbitMqService.close();
-  });
 
   registerSaldosRoutes(app);
   registerHealthRoutes(app);

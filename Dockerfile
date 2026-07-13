@@ -19,7 +19,6 @@ COPY --from=builder --chown=appuser:appgroup /app/dist ./dist
 COPY --from=builder --chown=appuser:appgroup /app/node_modules ./node_modules
 COPY --from=builder --chown=appuser:appgroup /app/prisma ./prisma
 COPY --from=builder --chown=appuser:appgroup /app/config.json ./
-COPY --from=builder --chown=appuser:appgroup /app/cli.ts ./cli.ts
 COPY --from=builder --chown=appuser:appgroup /app/scripts ./scripts
 
 RUN mkdir -p /app/logs && chown -R appuser:appgroup /app/logs

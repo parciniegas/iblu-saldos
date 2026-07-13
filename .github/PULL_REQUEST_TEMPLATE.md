@@ -14,7 +14,6 @@ Describe what this PR changes and why.
 - [ ] `npm test`
 - [ ] If Prisma schema changed: `npx prisma generate`
 - [ ] If API routes changed: verify affected endpoint(s)
-- [ ] If worker/queue changed: verify publish/consume flow
 
 ## Maintenance Matrix Checks
 

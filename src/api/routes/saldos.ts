@@ -4,7 +4,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { registerAuthPlugin } from '../plugins/auth.js';
 import type { JobStatus } from '../services/JobService.js';
 import { createJobService } from '../services/createJobService.js';
-import { toSaldosQueueMessage } from '../../application/contracts/SaldosQueueMessage.js';
 
 const jobService = createJobService();
 const cleanupTimer = setInterval(() => {
@@ -312,66 +311,4 @@ export function registerSaldosRoutes(app: FastifyInstance): void {
     }
   });
 
-  // POST /api/v1/saldos/queue
-  app.post<{ Body: { fechaDesde: string; batchSize: number } }>('/api/v1/saldos/queue', {
-    schema: {
-      tags: ['Saldos'],
-      security: [{ apiKey: [] }],
-      summary: 'Publicar procesamiento en cola',
-      body: {
-        type: 'object',
-        required: ['fechaDesde'],
-        properties: {
-          fechaDesde: { type: 'string', format: 'date' },
-          batchSize: { type: 'integer', minimum: 1 },
-        },
-      },
-      response: {
-        200: { type: 'object', additionalProperties: true },
-        400: { type: 'object', additionalProperties: true },
-        503: { type: 'object', additionalProperties: true },
-      },
-    },
-  }, async (request, reply) => {
-    try {
-      const parsed = procesarSchema.safeParse(request.body);
-
-      if (!parsed.success) {
-        return reply.status(400).send({
-          error: 'Validación fallida',
-          details: parsed.error.errors,
-        });
-      }
-
-      const { fechaDesde, batchSize } = parsed.data;
-      const config = app.config;
-      const effectiveBatchSize = Math.min(MAX_BATCH_SIZE, Math.max(MIN_BATCH_SIZE, batchSize ?? config?.procesamientoMovimientos?.batchSizeDefault ?? 1000));
-
-      const rabbitMqService = app.rabbitMqService;
-
-      if (!rabbitMqService) {
-        return reply.status(503).send({ error: 'RabbitMQ no disponible' });
-      }
-
-      const queueName = config.rabbitMq.queueName;
-      const queueMessage = toSaldosQueueMessage({
-        version: 1,
-        fechaDesde,
-        batchSize: effectiveBatchSize,
-      });
-
-      await rabbitMqService.publish(queueName, queueMessage);
-
-      return reply.send({
-        published: true,
-        queueName,
-        fechaDesde,
-        batchSize: effectiveBatchSize,
-      });
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      app.log.error({ error: errorMessage }, 'Error publicando a RabbitMQ');
-      return reply.status(500).send({ error: 'Error publicando mensaje', detail: errorMessage });
-    }
-  });
 }

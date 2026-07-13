@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a defect or regression in API, worker, or CLI
+description: Report a defect or regression in API or processing logic
 labels:
   - bug
 body:
@@ -43,7 +43,7 @@ body:
     attributes:
       label: Affected area
       description: Main area touched by this bug
-      placeholder: api | worker | cli | prisma | rabbitmq | k8s
+      placeholder: api | processing | prisma | k8s
 
   - type: textarea
     id: logs

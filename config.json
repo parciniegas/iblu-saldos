@@ -9,18 +9,9 @@
     "fechaDesdeDefault": "2000-01-01",
     "batchSizeDefault": 5000
   },
-  "rabbitMq": {
-    "hostName": "docker",
-    "port": 5672,
-    "userName": "admin",
-    "password": "P2ssw0rd",
-    "virtualHost": "/",
-    "queueName": "saldos",
-    "durable": false
-  },
   "logging": {
     "level": "info",
-    "filePath": "logs/saldos-worker-.json",
+    "filePath": "logs/saldos-api-.json",
     "rollingInterval": "day"
   },
   "server": {

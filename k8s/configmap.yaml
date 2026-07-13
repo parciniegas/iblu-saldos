@@ -17,18 +17,9 @@ data:
         "fechaDesdeDefault": "2000-01-01",
         "batchSizeDefault": 1000
       },
-      "rabbitMq": {
-        "hostName": "rabbitmq",
-        "port": 5672,
-        "userName": "admin",
-        "password": "PASSWORD",
-        "virtualHost": "/",
-        "queueName": "saldos",
-        "durable": false
-      },
       "logging": {
         "level": "info",
-        "filePath": "logs/saldos-worker-.json",
+        "filePath": "logs/saldos-api-.json",
         "rollingInterval": "day"
       },
       "server": {

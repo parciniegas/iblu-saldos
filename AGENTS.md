@@ -1,6 +1,6 @@
 # saldos-node
 
-Node.js accounting balance processing API and worker. Fastify API + RabbitMQ worker, Prisma/MySQL, TypeScript.
+Node.js accounting balance processing API. Fastify API + Prisma/MySQL, TypeScript.
 
 ## Setup
 
@@ -15,10 +15,7 @@ npx prisma generate  # generate Prisma client (required before any run)
 | --- | --- |
 | `npm run build` | `tsc && prisma generate` (build + regenerate client) |
 | `npm start` | Run API server (`tsx src/main.ts`) |
-| `npm run start:worker` | Run worker (`tsx worker/worker.ts`) |
 | `npm run dev:api` | Hot-reload API via `tsx watch src/api/server.ts` |
-| `npm run dev:worker` | Hot-reload worker via `tsx watch worker/worker.ts` |
-| `npm run cli` | CLI tool (`tsx cli.ts`) |
 | `npm test` | Run all tests (`vitest run`) |
 | `npm run test:coverage` | Tests with v8 coverage |
 
@@ -29,7 +26,7 @@ src/
   api/              # Fastify HTTP API (entry: server.ts)
     server.ts       # Fastify app, registers routes, decorates repos
     config.ts       # Config: loads config.json, overrides with env vars
-    routes/saldos.ts   # POST /api/v1/saldos/preview|procesar|queue|status/:jobId
+    routes/saldos.ts   # POST /api/v1/saldos/preview|procesar, GET jobs/status endpoints
     routes/health.ts   # GET /health|/health/detailed|/health/metrics
     plugins/auth.ts    # X-API-Key auth plugin
     services/JobService.ts     # Persistent job tracking (DB-backed)
@@ -46,22 +43,18 @@ src/
     types/       # SaldoContableKey, SaldoBaseKey, etc.
   infrastructure/
     persistence/  # PrismaService, MovimientoContableRepository, SaldoContableRepository
-    messaging/    # RabbitMqService (AMQP10)
 ```
 
-**Three processes:**
+**Single process:**
 
-- **API** (`server.ts`): Fastify on port 3000, exposes job management REST API
-- **Worker** (`worker/worker.ts`): Consumes from RabbitMQ queue "saldos", processes batches
-- **CLI** (`cli.ts`): Standalone CLI — `preview`, `procesar`, `queue`, `status` subcommands
+- **API** (`server.ts`): Fastify on port 3000, exposes async job management REST API
 
 **Processing flow:** `ProcesarSaldosContablesUseCase` iterates periods in ascending order, zero-initializes saldos, batches movements (1000–10000), aggregates accounts, computes `SaldoFinal` → next period's `SaldoInicial`.
 
 ## Config
 
 - File: `config.json` (root)
-- Env override keys: `ConnectionStrings__MariaDb`, `Server__Port`, `Server__Host`, `RabbitMq__HostName|Port|UserName|Password|VirtualHost|QueueName`
-- CLI also reads `config.json` for `fechaDesdeDefault` and `batchSizeDefault`
+- Env override keys: `ConnectionStrings__MariaDb`, `Server__Port`, `Server__Host`
 - Optional env for durable jobs store path: `SALDOS_JOB_STORE_PATH` (default `logs/jobs-store.json`)
 
 ## Testing
@@ -82,8 +75,8 @@ Tests use `vitest` with `globals: true`. No external services required — all r
 
 ## Gotchas
 
-- `tsconfig.json` excludes `cli.ts`, `worker/worker.ts`, `scripts/` — they are NOT type-checked by `tsc`. Run `tsx` directly for these files.
+- `tsconfig.json` excludes `scripts/` — they are NOT type-checked by `tsc`. Run `tsx` directly for scripts.
 - `noUnusedLocals` and `noUnusedParameters` are enabled — dead code will fail typecheck.
 - `prisma generate` must run before any database access. The Dockerfile and `npm run build` handle this, but standalone `tsx` invocations do not.
 - Config embeds credentials — never commit `config.json` with real secrets. Use env overrides in production.
-- Worker tolerates DB unavailability (logs warning, continues listening on RabbitMQ). API also tolerates it but won't persist job state.
+- API tolerates DB unavailability at startup, but processing endpoints require DB dependencies.

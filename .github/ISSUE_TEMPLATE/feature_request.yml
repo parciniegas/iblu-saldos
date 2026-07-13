@@ -1,5 +1,5 @@
 name: Feature request
-description: Propose an enhancement for API, worker, processing logic, or operations
+description: Propose an enhancement for API, processing logic, or operations
 labels:
   - enhancement
 body:
@@ -25,10 +25,8 @@ body:
       label: Primary area
       options:
         - API routes
-        - Worker queue processing
         - Core use case
         - Prisma persistence
-        - CLI
         - Kubernetes/deployment
     validations:
       required: true
@@ -38,7 +36,7 @@ body:
     attributes:
       label: Test plan
       description: How should this be validated?
-      placeholder: Unit tests, integration tests, manual API/CLI checks
+      placeholder: Unit tests, integration tests, manual API checks
 
   - type: textarea
     id: alternatives

@@ -1,5 +1,4 @@
 import { type FastifyInstance } from 'fastify';
-import type { RabbitMqRuntimeStats } from '../../infrastructure/messaging/RabbitMqService.js';
 
 export function registerHealthRoutes(app: FastifyInstance): void {
   app.get('/health', {
@@ -25,22 +24,20 @@ export function registerHealthRoutes(app: FastifyInstance): void {
     schema: {
       tags: ['Health'],
       summary: 'Health detallado',
-      description: 'Incluye estado de base de datos y telemetría básica de RabbitMQ.',
+      description: 'Incluye estado de base de datos.',
       response: {
         200: {
           type: 'object',
           properties: {
             status: { type: 'string' },
             database: { type: 'string' },
-            rabbitMq: { type: 'string' },
-            rabbitMqStats: { type: 'object', additionalProperties: true },
             timestamp: { type: 'string' },
           },
         },
       },
     },
   }, async () => {
-    const result: { status: string; database?: string; rabbitMq?: string; rabbitMqStats?: RabbitMqRuntimeStats; timestamp: string } = {
+    const result: { status: string; database?: string; timestamp: string } = {
       status: 'ok',
       timestamp: new Date().toISOString(),
     };
@@ -57,11 +54,6 @@ export function registerHealthRoutes(app: FastifyInstance): void {
       result.database = 'disconnected';
     }
 
-    result.rabbitMq = app.rabbitMqService ? 'connected' : 'disconnected';
-    if (app.rabbitMqService) {
-      result.rabbitMqStats = app.rabbitMqService.getStats();
-    }
-
     return result;
   });
 
@@ -69,21 +61,35 @@ export function registerHealthRoutes(app: FastifyInstance): void {
     schema: {
       tags: ['Health'],
       summary: 'Métricas operativas',
-      description: 'Retorna métricas agregadas de RabbitMQ observadas por el API.',
+      description: 'Retorna métricas operativas básicas del API.',
       response: {
         200: {
           type: 'object',
           properties: {
             timestamp: { type: 'string' },
-            rabbitMq: { type: ['object', 'null'], additionalProperties: true },
+            database: { type: 'string' },
           },
         },
       },
     },
   }, async () => {
+    let database = 'disconnected';
+
+    try {
+      const prisma = app.prismaClient;
+      if (prisma) {
+        await prisma.$queryRaw`SELECT 1`;
+        database = 'connected';
+      } else {
+        database = 'not configured';
+      }
+    } catch {
+      database = 'disconnected';
+    }
+
     return {
       timestamp: new Date().toISOString(),
-      rabbitMq: app.rabbitMqService?.getStats() ?? null,
+      database,
     };
   });
 }
