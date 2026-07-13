@@ -18,12 +18,37 @@ export type JobResult = {
   error?: string;
 };
 
+export type JobProgress = {
+  jobId: string;
+  status: 'processing';
+  fechaDesde: string;
+  batchSize: number;
+  periodosProcesados: number;
+  movimientosProcesados: number;
+  movimientosCuentaProcesados: number;
+  tiempoTotalMs: number;
+  eta?: string;
+};
+
+type ExecuteOptions = {
+  onProgress?: (progress: JobProgress) => void;
+  progressIntervalMs?: number;
+};
+
 const MIN_BATCH_SIZE = 1000;
 const MAX_BATCH_SIZE = 10000;
+const DEFAULT_PROGRESS_PERCENT_STEP = 5;
+const DEFAULT_BATCH_LOG_STEP = 10;
+const DEFAULT_PROGRESS_INTERVAL_MS = 3000;
 
 type PeriodProcessingResult = {
   totalPeriodMovimientos: number;
   totalPeriodCuentas: number;
+};
+
+type ZeroInitializationResult = {
+  saldos: SaldoContable[];
+  resetCount: number;
 };
 
 type SaldoUpdatePayload = {
@@ -49,6 +74,7 @@ export class ProcesarSaldosContablesUseCase {
     fechaDesde: string,
     batchSize: number,
     jobId: string,
+    options?: ExecuteOptions,
   ): Promise<JobResult> {
     const inicio = Date.now();
     const fechaDesdeDate = new Date(fechaDesde + 'T00:00:00');
@@ -56,14 +82,44 @@ export class ProcesarSaldosContablesUseCase {
 
     this.logger.info({ jobId, fechaDesde, effectiveBatchSize }, '[SALDOS] Iniciando procesamiento');
 
+    const progressPercentStep = this.resolvePositiveIntEnv('SALDOS_PROGRESS_PERCENT_STEP', DEFAULT_PROGRESS_PERCENT_STEP);
+    const batchLogStep = this.resolvePositiveIntEnv('SALDOS_BATCH_LOG_STEP', DEFAULT_BATCH_LOG_STEP);
+    this.logger.info({ jobId, progressPercentStep, batchLogStep }, '[SALDOS] Configuración de logs de avance');
+
     let totalMovimientosProcesados = 0;
     let totalMovimientosCuentaProcesados = 0;
     let periodosProcesados = 0;
+    let periodoMovimientosEnCurso = 0;
+    let periodoCuentasEnCurso = 0;
+    let lastProgressEmitAt = 0;
+
+    const progressIntervalMs = options?.progressIntervalMs ?? DEFAULT_PROGRESS_INTERVAL_MS;
+
+    const emitProgress = (force: boolean = false, eta?: string): void => {
+      if (!options?.onProgress) return;
+
+      const now = Date.now();
+      if (!force && now - lastProgressEmitAt < progressIntervalMs) return;
+      lastProgressEmitAt = now;
+
+      options.onProgress({
+        jobId,
+        status: 'processing',
+        fechaDesde,
+        batchSize: effectiveBatchSize,
+        periodosProcesados,
+        movimientosProcesados: totalMovimientosProcesados + periodoMovimientosEnCurso,
+        movimientosCuentaProcesados: totalMovimientosCuentaProcesados + periodoCuentasEnCurso,
+        tiempoTotalMs: now - inicio,
+        eta,
+      });
+    };
 
     try {
       const periodos = await this.movimientoRepo.getPeriodosDesdeFecha(fechaDesdeDate);
       this.logger.info({ jobId, periodosCount: periodos.length }, '[SALDOS] Periodos encontrados');
       const priorPeriodById = this.buildPriorPeriodMap(periodos);
+      emitProgress(true);
 
       let periodTimesTotal = 0;
 
@@ -73,6 +129,13 @@ export class ProcesarSaldosContablesUseCase {
           periodoId,
           effectiveBatchSize,
           priorPeriodById.get(periodoId) ?? null,
+          batchLogStep,
+          progressPercentStep,
+          (currentPeriodMovimientos, currentPeriodCuentas) => {
+            periodoMovimientosEnCurso = currentPeriodMovimientos;
+            periodoCuentasEnCurso = currentPeriodCuentas;
+            emitProgress();
+          },
         );
 
         const periodoTiempo = Date.now() - periodoStart;
@@ -80,6 +143,8 @@ export class ProcesarSaldosContablesUseCase {
         periodosProcesados++;
         totalMovimientosProcesados += totalPeriodMovimientos;
         totalMovimientosCuentaProcesados += totalPeriodCuentas;
+        periodoMovimientosEnCurso = 0;
+        periodoCuentasEnCurso = 0;
 
         const promedioMs = periodTimesTotal / periodosProcesados;
         const periodosRestantes = periodos.length - periodosProcesados;
@@ -95,6 +160,8 @@ export class ProcesarSaldosContablesUseCase {
           promedioMs: Math.round(promedioMs),
           eta,
         }, `[SALDOS] Periodo ${periodoId} completado`);
+
+        emitProgress(true, eta);
       }
 
       const tiempoTotal = Date.now() - inicio;
@@ -110,6 +177,8 @@ export class ProcesarSaldosContablesUseCase {
         tiempoTotalMs: tiempoTotal,
         eta,
       }, '[SALDOS] Procesamiento completado');
+
+      emitProgress(true, eta);
 
       return {
         jobId,
@@ -158,8 +227,13 @@ export class ProcesarSaldosContablesUseCase {
     periodoId: number,
     batchSize: number,
     priorPeriodId: number | null,
+    batchLogStep: number,
+    progressPercentStep: number,
+    onPeriodProgress?: (movimientosProcesados: number, cuentasProcesadas: number) => void,
   ): Promise<PeriodProcessingResult> {
-    const saldosDelPeriodo = await this.zeroInitializePeriod(periodoId, batchSize);
+    const { saldos: saldosDelPeriodo, resetCount } = await this.zeroInitializePeriod(periodoId, batchSize);
+    this.logger.info({ periodoId, saldosInicializados: resetCount }, '[SALDOS] Saldos del periodo inicializados');
+
     const saldosByKey = new Map<string, SaldoContable>();
 
     for (const saldo of saldosDelPeriodo) {
@@ -173,10 +247,12 @@ export class ProcesarSaldosContablesUseCase {
     let batch: Awaited<ReturnType<IMovimientoContableRepository['getBatchByPeriodo']>>;
     let totalPeriodMovimientos = 0;
     let totalPeriodCuentas = 0;
+    let batchIndex = 0;
 
     do {
       batch = await this.movimientoRepo.getBatchByPeriodo(periodoId, batchSize, lastId);
       if (batch.length === 0) break;
+      batchIndex++;
 
       this.logger.debug({ periodoId, batchSize: batch.length, lastId }, '[SALDOS] Batch obtenido');
 
@@ -208,10 +284,21 @@ export class ProcesarSaldosContablesUseCase {
       lastId = batch.at(-1)!.id;
       
       this.logger.debug({ periodoId, totalPeriodMovimientos, totalPeriodCuentas }, '[SALDOS] Batch procesado completamente');
+      if (batchIndex % batchLogStep === 0 || batch.length < batchSize) {
+        this.logger.info({
+          periodoId,
+          batchIndex,
+          batchMovimientos: batch.length,
+          totalPeriodMovimientos,
+          totalPeriodCuentas,
+        }, '[SALDOS] Avance de procesamiento por lotes');
+      }
+
+      onPeriodProgress?.(totalPeriodMovimientos, totalPeriodCuentas);
     } while (batch.length >= batchSize);
 
     const saldosActualizados = Array.from(saldosByKey.values());
-    await this.computePeriodSaldos(periodoId, saldosActualizados, totalPeriodCuentas, priorPeriodId);
+    await this.computePeriodSaldos(periodoId, saldosActualizados, totalPeriodCuentas, priorPeriodId, progressPercentStep);
 
     return {
       totalPeriodMovimientos,
@@ -219,9 +306,10 @@ export class ProcesarSaldosContablesUseCase {
     };
   }
 
-  private async zeroInitializePeriod(periodoId: number, batchSize: number): Promise<SaldoContable[]> {
+  private async zeroInitializePeriod(periodoId: number, batchSize: number): Promise<ZeroInitializationResult> {
     const saldos = await this.saldoRepo.getByPeriodo(periodoId);
     this.logger.debug({ periodoId, totalSaldos: saldos.length, batchSize }, '[SALDOS] Iniciando zeroInitializePeriod');
+    this.logger.info({ periodoId, totalSaldos: saldos.length }, '[SALDOS] Iniciando reseteo de saldos del periodo');
 
     for (const saldo of saldos) {
       saldo.saldoInicialDebito = 0;
@@ -236,7 +324,12 @@ export class ProcesarSaldosContablesUseCase {
       await this.saldoRepo.bulkUpdate(saldos);
     }
 
-    return saldos;
+    this.logger.info({ periodoId, totalSaldos: saldos.length }, '[SALDOS] Reseteo de saldos finalizado');
+
+    return {
+      saldos,
+      resetCount: saldos.length,
+    };
   }
 
   private async computePeriodSaldos(
@@ -244,14 +337,17 @@ export class ProcesarSaldosContablesUseCase {
     saldos: SaldoContable[],
     cuentasProcesadas: number,
     priorPeriodId: number | null,
+    progressPercentStep: number,
   ): Promise<void> {
     if (cuentasProcesadas === 0) return;
 
     this.logger.debug({ periodoId, cuentasProcesadas, saldosCount: saldos.length }, '[SALDOS] Iniciando computePeriodSaldos');
+    this.logger.info({ periodoId, cuentasProcesadas, saldosCount: saldos.length }, '[SALDOS] Iniciando cálculo de saldos finales');
 
     const priorSaldosByKey = await this.buildPriorSaldosByKey(priorPeriodId);
     const pendingUpdates: SaldoUpdatePayload[] = [];
     const saldosByKey = new Map<string, SaldoContable>();
+    let lastLoggedPercent = 0;
 
     for (const saldo of saldos) {
       saldosByKey.set(this.buildSaldoKey(periodoId, saldo.terceroId, saldo.cuentaContableId, saldo.centroCostoId), saldo);
@@ -261,9 +357,22 @@ export class ProcesarSaldosContablesUseCase {
       const saldo = saldos[saldoIndex];
       if (!saldo) continue;
 
-      if (saldoIndex > 0 && saldoIndex % 1000 === 0) {
-        this.logger.debug({ periodoId, procesados: saldoIndex, total: saldos.length }, '[SALDOS] computePeriodSaldos en progreso');
+      const processed = saldoIndex + 1;
+      const percent = Math.floor((processed * 100) / saldos.length);
+      const shouldLogMilestone = percent >= lastLoggedPercent + progressPercentStep;
+      const isLastItem = processed === saldos.length;
+
+      if (shouldLogMilestone || isLastItem) {
+        // Round down milestone to stable configured percent steps.
+        lastLoggedPercent = Math.min(100, Math.floor(percent / progressPercentStep) * progressPercentStep);
+        this.logger.info({
+          periodoId,
+          procesados: processed,
+          total: saldos.length,
+          porcentaje: percent,
+        }, '[SALDOS] Avance de cálculo de saldos');
       }
+
       pendingUpdates.push(this.buildSaldoUpdate(periodoId, saldo, priorPeriodId, priorSaldosByKey));
     }
 
@@ -287,6 +396,14 @@ export class ProcesarSaldosContablesUseCase {
     if (saldos.length > 0) {
       await this.saldoRepo.bulkUpdate(saldos);
     }
+
+    this.logger.info({ periodoId, saldosActualizados: saldos.length }, '[SALDOS] Cálculo de saldos finalizado');
+  }
+
+  private resolvePositiveIntEnv(name: string, fallback: number): number {
+    const value = Number.parseInt(process.env[name] ?? '', 10);
+    if (Number.isNaN(value) || value <= 0) return fallback;
+    return value;
   }
 
   private async buildPriorSaldosByKey(priorPeriodId: number | null): Promise<Map<string, SaldoContable>> {

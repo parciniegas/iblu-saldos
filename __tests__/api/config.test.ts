@@ -11,6 +11,7 @@ const ENV_KEYS = [
   'RabbitMq__Password',
   'RabbitMq__VirtualHost',
   'RabbitMq__QueueName',
+  'RabbitMq__Durable',
 ] as const;
 
 const previousEnv = new Map<string, string | undefined>();
@@ -57,6 +58,7 @@ describe('loadConfig', () => {
           password: 'rabbit-pass',
           virtualHost: '/',
           queueName: 'cola-principal',
+          durable: false,
         },
         logging: { level: 'debug', filePath: 'logs/saldos-worker-.json', rollingInterval: 'day' },
         server: { port: 3000, host: '127.0.0.1' },
@@ -65,12 +67,14 @@ describe('loadConfig', () => {
 
     process.env.Server__Port = '3010';
     process.env.RabbitMq__Port = '5678';
+    process.env.RabbitMq__Durable = 'true';
 
     const { loadConfig } = await importConfigModule();
     const config = loadConfig();
 
     expect(config.server.port).toBe(3010);
     expect(config.rabbitMq.port).toBe(5678);
+    expect(config.rabbitMq.durable).toBe(true);
   });
 
   it('conserva el fallback numérico cuando RabbitMq__Port no es válido', async () => {
@@ -86,6 +90,7 @@ describe('loadConfig', () => {
           password: 'rabbit-pass',
           virtualHost: '/',
           queueName: 'cola-principal',
+          durable: false,
         },
         logging: { level: 'info', filePath: 'logs/saldos-worker-.json', rollingInterval: 'day' },
         server: { port: 3000, host: '0.0.0.0' },

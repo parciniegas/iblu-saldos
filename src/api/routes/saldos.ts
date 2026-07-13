@@ -255,7 +255,19 @@ export function registerSaldosRoutes(app: FastifyInstance): void {
         try {
           jobService.updateJob(jobId, { status: 'processing' });
 
-          const result = await useCase.execute(fechaDesde, effectiveBatchSize, jobId);
+          const result = await useCase.execute(fechaDesde, effectiveBatchSize, jobId, {
+            progressIntervalMs: 2000,
+            onProgress: (progress) => {
+              jobService.updateJob(jobId, {
+                status: progress.status,
+                periodosProcesados: progress.periodosProcesados,
+                movimientosProcesados: progress.movimientosProcesados,
+                movimientosCuentaProcesados: progress.movimientosCuentaProcesados,
+                tiempoTotalMs: progress.tiempoTotalMs,
+                eta: progress.eta,
+              });
+            },
+          });
 
           if (result.status === 'completed') {
             jobService.updateJob(jobId, {

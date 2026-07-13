@@ -157,4 +157,53 @@ describe('ProcesarSaldosContablesUseCase', () => {
     expect(result.tiempoTotalMs).toBeTypeOf('number');
     expect(result.jobId).toBe('test-job');
   });
+
+  it('debe emitir progreso durante el procesamiento', async () => {
+    const { movimientoRepo, saldoRepo } = createMockRepositories();
+
+    movimientoRepo.getPeriodosDesdeFecha.mockResolvedValue([1]);
+    movimientoRepo.getBatchByPeriodo
+      .mockResolvedValueOnce([{ id: 10 } as MovimientoContable])
+      .mockResolvedValueOnce([]);
+    movimientoRepo.getCuentasAgrupadasPorMovimientos.mockResolvedValue([
+      {
+        MovimientoContableId: 10,
+        PeriodoId: 1,
+        CuentaContableId: 1105,
+        TerceroId: 200,
+        CentroCostoId: 10,
+        LibroContableId: 1,
+        UnidadNegocioId: 1,
+        CentroOperacionId: 1,
+        CategorizacionId: 1,
+        ModeloCarteraId: 1,
+        ModeloCartera: 'A',
+        ConceptoTributarioId: 1,
+        Debito: 100,
+        Credito: 25,
+        RegistrosMovimientoContableCuenta: 1,
+      } as MovimientoContableCuentaAgrupadaRow,
+    ]);
+
+    saldoRepo.getByPeriodo.mockResolvedValue([]);
+
+    const useCase = new ProcesarSaldosContablesUseCase(
+      movimientoRepo,
+      saldoRepo,
+      mockLogger,
+    );
+
+    const onProgress = vi.fn();
+    const result = await useCase.execute('2024-01-01', 1000, 'test-job', {
+      onProgress,
+      progressIntervalMs: 0,
+    });
+
+    expect(result.status).toBe('completed');
+    expect(onProgress).toHaveBeenCalled();
+
+    const lastCall = onProgress.mock.calls.at(-1)?.[0];
+    expect(lastCall?.status).toBe('processing');
+    expect(lastCall?.movimientosProcesados).toBeGreaterThanOrEqual(1);
+  });
 });

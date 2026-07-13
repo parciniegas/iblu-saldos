@@ -1,11 +1,11 @@
 import pino from 'pino';
-import { loadConfig, type AppConfig } from './src/api/config.js';
-import { connectPrisma, setPrismaLogger, disconnectPrisma } from './src/infrastructure/persistence/PrismaService.js';
-import { MovimientoContableRepository } from './src/infrastructure/persistence/MovimientoContableRepository.js';
-import { SaldoContableRepository } from './src/infrastructure/persistence/SaldoContableRepository.js';
-import { ProcesarSaldosContablesUseCase } from './src/application/useCases/ProcesarSaldosContablesUseCase.js';
-import { RabbitMqServiceImpl, type RabbitMqSettings } from './src/infrastructure/messaging/RabbitMqService.js';
-import { saldosQueueMessageSchema, toSaldosQueueMessage } from './src/application/contracts/SaldosQueueMessage.js';
+import { loadConfig, type AppConfig } from '../src/api/config.js';
+import { connectPrisma, setPrismaLogger, disconnectPrisma } from '../src/infrastructure/persistence/PrismaService.js';
+import { MovimientoContableRepository } from '../src/infrastructure/persistence/MovimientoContableRepository.js';
+import { SaldoContableRepository } from '../src/infrastructure/persistence/SaldoContableRepository.js';
+import { ProcesarSaldosContablesUseCase } from '../src/application/useCases/ProcesarSaldosContablesUseCase.js';
+import { RabbitMqServiceImpl, type RabbitMqSettings } from '../src/infrastructure/messaging/RabbitMqService.js';
+import { saldosQueueMessageSchema, toSaldosQueueMessage } from '../src/application/contracts/SaldosQueueMessage.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const config: AppConfig = loadConfig();

@@ -15,7 +15,8 @@
     "userName": "admin",
     "password": "P2ssw0rd",
     "virtualHost": "/",
-    "queueName": "saldos"
+    "queueName": "saldos",
+    "durable": false
   },
   "logging": {
     "level": "info",

@@ -1,61 +1,63 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-type MessageHandler = (message: { body: unknown }) => void | Promise<void>;
+type MessageHandler = (message: { content: Buffer } | null) => void | Promise<void>;
 
 const mocks = vi.hoisted(() => {
   const state = {
     messageHandler: null as MessageHandler | null,
-    sender: {
-      send: vi.fn(),
+    channel: {
+      assertQueue: vi.fn(),
+      prefetch: vi.fn(),
+      consume: vi.fn(),
+      sendToQueue: vi.fn(),
+      ack: vi.fn(),
+      once: vi.fn(),
+      cancel: vi.fn(),
+      close: vi.fn(),
     },
-    receiver: {
+    connection: {
       on: vi.fn(),
-      accept: vi.fn(),
+      createChannel: vi.fn(),
+      close: vi.fn(),
     },
-    client: {
-      on: vi.fn(),
-      connect: vi.fn(),
-      createSender: vi.fn(),
-      createReceiver: vi.fn(),
-      disconnect: vi.fn(),
-    },
+    connect: vi.fn(),
   };
-
-  const ClientMock = vi.fn();
 
   const reset = () => {
     state.messageHandler = null;
 
-    state.sender.send = vi.fn().mockResolvedValue(undefined);
-
-    state.receiver.on = vi.fn((event: string, handler: MessageHandler) => {
-      if (event === 'message') {
-        state.messageHandler = handler;
-      }
+    state.channel.assertQueue = vi.fn().mockResolvedValue(undefined);
+    state.channel.prefetch = vi.fn().mockResolvedValue(undefined);
+    state.channel.consume = vi.fn().mockImplementation((_queue: string, handler: MessageHandler) => {
+      state.messageHandler = handler;
+      return Promise.resolve({ consumerTag: 'ctag-1' });
     });
-    state.receiver.accept = vi.fn();
+    state.channel.sendToQueue = vi.fn().mockReturnValue(true);
+    state.channel.ack = vi.fn();
+    state.channel.once = vi.fn();
+    state.channel.cancel = vi.fn().mockResolvedValue(undefined);
+    state.channel.close = vi.fn().mockResolvedValue(undefined);
 
-    state.client.on = vi.fn();
-    state.client.connect = vi.fn().mockResolvedValue(undefined);
-    state.client.createSender = vi.fn().mockResolvedValue(state.sender);
-    state.client.createReceiver = vi.fn().mockResolvedValue(state.receiver);
-    state.client.disconnect = vi.fn().mockResolvedValue(undefined);
+    state.connection.on = vi.fn();
+    state.connection.createChannel = vi.fn().mockResolvedValue(state.channel);
+    state.connection.close = vi.fn().mockResolvedValue(undefined);
 
-    ClientMock.mockReset();
-    ClientMock.mockImplementation(() => state.client);
+    state.connect = vi.fn().mockResolvedValue(state.connection);
   };
 
   reset();
 
   return {
     state,
-    ClientMock,
     reset,
   };
 });
 
-vi.mock('amqp10', () => ({
-  Client: mocks.ClientMock,
+vi.mock('amqplib', () => ({
+  default: {
+    connect: (...args: unknown[]) => mocks.state.connect(...args),
+  },
+  connect: (...args: unknown[]) => mocks.state.connect(...args),
 }));
 
 import { RabbitMqServiceImpl } from '../../src/infrastructure/messaging/RabbitMqService.js';
@@ -82,14 +84,18 @@ describe('RabbitMqServiceImpl', () => {
 
     await service.connect();
 
-    expect(mocks.ClientMock).toHaveBeenCalledTimes(1);
-    expect(mocks.state.client.connect).toHaveBeenCalledWith('amqp://admin:P2ssw0rd@docker:5672');
-    expect(mocks.state.client.createSender).toHaveBeenCalledWith('saldos');
-    expect(mocks.state.client.createReceiver).toHaveBeenCalledWith('saldos');
+    expect(mocks.state.connect).toHaveBeenCalledTimes(1);
+    expect(mocks.state.connect).toHaveBeenCalledWith('amqp://admin:P2ssw0rd@docker:5672/%2F');
+    expect(mocks.state.connection.createChannel).toHaveBeenCalledTimes(1);
+    expect(mocks.state.channel.assertQueue).toHaveBeenCalledWith('saldos', { durable: false });
 
     await service.publish('saldos', { jobId: '123' });
 
-    expect(mocks.state.sender.send).toHaveBeenCalledWith('{"jobId":"123"}');
+    expect(mocks.state.channel.sendToQueue).toHaveBeenCalledWith(
+      'saldos',
+      Buffer.from('{"jobId":"123"}', 'utf-8'),
+      { persistent: true, contentType: 'application/json' },
+    );
     expect(service.getStats().publishedCount).toBe(1);
   });
 
@@ -100,13 +106,13 @@ describe('RabbitMqServiceImpl', () => {
     await service.connect();
     await service.consume('saldos', handler);
 
-    expect(mocks.state.receiver.on).toHaveBeenCalledWith('message', expect.any(Function));
+    expect(mocks.state.channel.consume).toHaveBeenCalledWith('saldos', expect.any(Function), { noAck: false });
     expect(mocks.state.messageHandler).not.toBeNull();
 
-    await mocks.state.messageHandler?.({ body: '{"jobId":"abc"}' });
+    await mocks.state.messageHandler?.({ content: Buffer.from('{"jobId":"abc"}', 'utf-8') });
 
     expect(handler).toHaveBeenCalledWith({ jobId: 'abc' });
-    expect(mocks.state.receiver.accept).toHaveBeenCalledTimes(1);
+    expect(mocks.state.channel.ack).toHaveBeenCalledTimes(1);
     expect(service.getStats().consumedCount).toBe(1);
   });
 });

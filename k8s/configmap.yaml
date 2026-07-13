@@ -23,7 +23,8 @@ data:
         "userName": "admin",
         "password": "PASSWORD",
         "virtualHost": "/",
-        "queueName": "saldos"
+        "queueName": "saldos",
+        "durable": false
       },
       "logging": {
         "level": "info",

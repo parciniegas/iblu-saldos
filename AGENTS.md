@@ -15,9 +15,9 @@ npx prisma generate  # generate Prisma client (required before any run)
 | --- | --- |
 | `npm run build` | `tsc && prisma generate` (build + regenerate client) |
 | `npm start` | Run API server (`tsx src/main.ts`) |
-| `npm run start:worker` | Run worker (`tsx worker.ts`) |
+| `npm run start:worker` | Run worker (`tsx worker/worker.ts`) |
 | `npm run dev:api` | Hot-reload API via `tsx watch src/api/server.ts` |
-| `npm run dev:worker` | Hot-reload worker via `tsx watch worker.ts` |
+| `npm run dev:worker` | Hot-reload worker via `tsx watch worker/worker.ts` |
 | `npm run cli` | CLI tool (`tsx cli.ts`) |
 | `npm test` | Run all tests (`vitest run`) |
 | `npm run test:coverage` | Tests with v8 coverage |
@@ -52,7 +52,7 @@ src/
 **Three processes:**
 
 - **API** (`server.ts`): Fastify on port 3000, exposes job management REST API
-- **Worker** (`worker.ts`): Consumes from RabbitMQ queue "saldos", processes batches
+- **Worker** (`worker/worker.ts`): Consumes from RabbitMQ queue "saldos", processes batches
 - **CLI** (`cli.ts`): Standalone CLI — `preview`, `procesar`, `queue`, `status` subcommands
 
 **Processing flow:** `ProcesarSaldosContablesUseCase` iterates periods in ascending order, zero-initializes saldos, batches movements (1000–10000), aggregates accounts, computes `SaldoFinal` → next period's `SaldoInicial`.
@@ -82,7 +82,7 @@ Tests use `vitest` with `globals: true`. No external services required — all r
 
 ## Gotchas
 
-- `tsconfig.json` excludes `cli.ts`, `worker.ts`, `scripts/` — they are NOT type-checked by `tsc`. Run `tsx` directly for these files.
+- `tsconfig.json` excludes `cli.ts`, `worker/worker.ts`, `scripts/` — they are NOT type-checked by `tsc`. Run `tsx` directly for these files.
 - `noUnusedLocals` and `noUnusedParameters` are enabled — dead code will fail typecheck.
 - `prisma generate` must run before any database access. The Dockerfile and `npm run build` handle this, but standalone `tsx` invocations do not.
 - Config embeds credentials — never commit `config.json` with real secrets. Use env overrides in production.

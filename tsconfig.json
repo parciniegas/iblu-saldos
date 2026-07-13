@@ -22,5 +22,5 @@
     "noUncheckedIndexedAccess": true
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "__tests__", "cli.ts", "worker.ts", "scripts"]
+  "exclude": ["node_modules", "dist", "__tests__", "cli.ts", "worker/worker.ts", "scripts"]
 }

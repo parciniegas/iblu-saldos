@@ -1,4 +1,4 @@
-import { Client, type AmqpMessage, type Receiver, type Sender } from 'amqp10';
+import amqp, { type Channel, type ChannelModel, type ConsumeMessage } from 'amqplib';
 import pino from 'pino';
 
 export type RabbitMqSettings = {
@@ -8,6 +8,7 @@ export type RabbitMqSettings = {
   password: string;
   virtualHost: string;
   queueName: string;
+  durable?: boolean;
 };
 
 export type RabbitMqRuntimeStats = {
@@ -32,11 +33,14 @@ export interface IRabbitMqService {
 }
 
 export class RabbitMqServiceImpl implements IRabbitMqService {
-  private client: Client | null = null;
-  private sender: Sender | null = null;
-  private receiver: Receiver | null = null;
+  private connection: ChannelModel | null = null;
+  private channel: Channel | null = null;
   private logger: pino.Logger | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
+  private consumerTag: string | null = null;
+  private isShuttingDown = false;
+  private consumeQueueName: string | null = null;
+  private consumeHandler: ((message: unknown) => Promise<void>) | null = null;
   private readonly stats: RabbitMqRuntimeStats = {
     connectAttempts: 0,
     successfulConnections: 0,
@@ -56,52 +60,93 @@ export class RabbitMqServiceImpl implements IRabbitMqService {
   }
 
   private getConnectionString(): string {
-    return `amqp://${this.settings.userName}:${this.settings.password}@${this.settings.hostName}:${this.settings.port}`;
-  }
-
-  private onSenderCreated(sender: Sender): void {
-    this.sender = sender;
-  }
-
-  private onReceiverCreated(receiver: Receiver, resolve: () => void): void {
-    this.receiver = receiver;
-    this.logger?.info({ queueName: this.settings.queueName }, 'RabbitMQ consumiendo mensajes');
-    resolve();
+    const virtualHost = this.settings.virtualHost && this.settings.virtualHost.trim().length > 0
+      ? this.settings.virtualHost
+      : '/';
+    const normalizedVHost = virtualHost.startsWith('/') ? virtualHost : `/${virtualHost}`;
+    const encodedVHost = normalizedVHost === '/' ? '%2F' : encodeURIComponent(normalizedVHost.slice(1));
+    return `amqp://${encodeURIComponent(this.settings.userName)}:${encodeURIComponent(this.settings.password)}@${this.settings.hostName}:${this.settings.port}/${encodedVHost}`;
   }
 
   private onDisconnected(): void {
+    if (this.isShuttingDown) return;
+
     this.logger?.warn('Desconectado de RabbitMQ, reintentando...');
     this.stats.disconnectEvents += 1;
+    this.channel = null;
+    this.connection = null;
+    this.consumerTag = null;
     this.scheduleReconnect();
+  }
+
+  private async ensureQueue(queueName: string): Promise<void> {
+    if (!this.channel) {
+      throw new Error('RabbitMQ channel no disponible. Llama connect() primero.');
+    }
+
+    await this.channel.assertQueue(queueName, {
+      durable: this.settings.durable ?? false,
+    });
+  }
+
+  private async startConsumerIfConfigured(): Promise<void> {
+    if (!this.channel || !this.consumeHandler || !this.consumeQueueName) return;
+
+    await this.ensureQueue(this.consumeQueueName);
+    await this.channel.prefetch(1);
+
+    const consumeResult = await this.channel.consume(this.consumeQueueName, async (message: ConsumeMessage | null) => {
+      if (!message) return;
+
+      try {
+        this.stats.consumedCount += 1;
+        const payload = message.content.toString('utf-8');
+        const parsed = payload.length > 0 ? JSON.parse(payload) : null;
+
+        await this.consumeHandler?.(parsed);
+        this.channel?.ack(message);
+      } catch (error) {
+        this.stats.consumeErrors += 1;
+        this.logger?.error({ error: error instanceof Error ? error.message : String(error) }, 'Error procesando mensaje');
+        this.channel?.ack(message);
+      }
+    }, {
+      noAck: false,
+    });
+
+    this.consumerTag = consumeResult.consumerTag;
+    this.logger?.info({ queueName: this.consumeQueueName }, 'RabbitMQ consumiendo mensajes');
   }
 
   async connect(): Promise<void> {
     this.stats.connectAttempts += 1;
+    this.isShuttingDown = false;
 
     try {
-      this.client = new Client();
+      if (this.connection) {
+        try {
+          await this.connection.close();
+        } catch {
+          // ignore
+        }
+      }
 
-      this.client.on('client:errorReceived', (err: Error) => {
+      this.connection = await amqp.connect(this.getConnectionString());
+      this.connection.on('error', (err: Error) => {
         this.logger?.error({ error: err.message }, 'Error de conexión RabbitMQ');
       });
-
-      this.client.on('disconnected', () => {
+      this.connection.on('close', () => {
         this.onDisconnected();
       });
 
-      await this.client.connect(this.getConnectionString());
+      this.channel = await this.connection.createChannel();
+      await this.ensureQueue(this.settings.queueName);
 
       this.stats.successfulConnections += 1;
       this.stats.lastConnectedAt = new Date().toISOString();
       this.logger?.info({ queueName: this.settings.queueName }, 'RabbitMQ conectado');
 
-      const sender = await this.client.createSender(this.settings.queueName);
-      this.onSenderCreated(sender);
-
-      const receiver = await this.client.createReceiver(this.settings.queueName);
-      await new Promise<void>((resolve) => {
-        this.onReceiverCreated(receiver, resolve);
-      });
+      await this.startConsumerIfConfigured();
     } catch (error) {
       this.logger?.error({ error: error instanceof Error ? error.message : String(error) }, 'Error conectando a RabbitMQ');
       this.scheduleReconnect();
@@ -125,19 +170,36 @@ export class RabbitMqServiceImpl implements IRabbitMqService {
   }
 
   async publish(queueName: string, message: object): Promise<void> {
-    const sender = this.sender;
-    if (!sender) {
+    if (!this.channel) {
       throw new Error('RabbitMQ no conectado. Llama connect() primero.');
     }
 
     const address = queueName || this.settings.queueName;
+    await this.ensureQueue(address);
+
     return new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.stats.publishTimeouts += 1;
         reject(new Error('Timeout publicando mensaje'));
       }, 5000);
 
-      sender.send(JSON.stringify(message)).then(() => {
+      const payload = Buffer.from(JSON.stringify(message), 'utf-8');
+      const sent = this.channel?.sendToQueue(address, payload, {
+        persistent: true,
+        contentType: 'application/json',
+      }) ?? false;
+
+      if (!sent && this.channel) {
+        this.channel.once('drain', () => {
+          clearTimeout(timeout);
+          this.stats.publishedCount += 1;
+          this.logger?.debug({ queue: address }, 'Mensaje publicado a RabbitMQ');
+          resolve();
+        });
+        return;
+      }
+
+      Promise.resolve().then(() => {
         clearTimeout(timeout);
         this.stats.publishedCount += 1;
         this.logger?.debug({ queue: address }, 'Mensaje publicado a RabbitMQ');
@@ -157,30 +219,14 @@ export class RabbitMqServiceImpl implements IRabbitMqService {
   }
 
   async consume(_queueName: string, handler: (message: unknown) => Promise<void>): Promise<void> {
-    if (!this.receiver) {
+    this.consumeQueueName = _queueName || this.settings.queueName;
+    this.consumeHandler = handler;
+
+    if (!this.channel) {
       throw new Error('RabbitMQ no conectado. Llama connect() primero.');
     }
 
-    this.receiver.on('message', async (message: AmqpMessage) => {
-      try {
-        this.stats.consumedCount += 1;
-        const body = message.body;
-        const payload = body instanceof Buffer ? body.toString('utf-8') : body;
-        const parsed = typeof payload === 'string' ? JSON.parse(payload) : payload;
-
-        await handler(parsed);
-
-        if (this.receiver) {
-          this.receiver.accept(message);
-        }
-      } catch (error) {
-        this.stats.consumeErrors += 1;
-        this.logger?.error({ error: error instanceof Error ? error.message : String(error) }, 'Error procesando mensaje');
-        if (this.receiver) {
-          this.receiver.accept(message);
-        }
-      }
-    });
+    await this.startConsumerIfConfigured();
   }
 
   getStats(): RabbitMqRuntimeStats {
@@ -188,18 +234,32 @@ export class RabbitMqServiceImpl implements IRabbitMqService {
   }
 
   async close(): Promise<void> {
+    this.isShuttingDown = true;
+
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
 
     try {
-      if (this.client) {
-        await this.client.disconnect();
+      if (this.channel && this.consumerTag) {
+        await this.channel.cancel(this.consumerTag);
+      }
+      this.consumerTag = null;
+
+      if (this.channel) {
+        await this.channel.close();
+      }
+
+      if (this.connection) {
+        await this.connection.close();
       }
     } catch {
       // Ignore errors on close
     }
+
+    this.channel = null;
+    this.connection = null;
 
     this.logger?.info('RabbitMQ desconectado');
   }
