@@ -6,8 +6,8 @@
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc && prisma generate",
-    "start": "tsx server.ts",
-    "start:worker": "node dist/worker.js",
+    "start": "tsx src/main.ts",
+    "start:worker": "tsx worker.ts",
     "dev:api": "tsx watch src/api/server.ts",
     "dev:worker": "tsx watch worker.ts",
     "cli": "tsx cli.ts",
@@ -20,7 +20,11 @@
     "docker:build": "docker build -t saldos-api:latest .",
     "docker:run": "docker run -p 3000:3000 --env-file .env saldos-api:latest"
   },
-  "keywords": ["saldos", "contabilidad", "mysql"],
+  "keywords": [
+    "saldos",
+    "contabilidad",
+    "mysql"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
@@ -32,18 +36,19 @@
     "amqp10": "^3.0.0",
     "fastify": "^5.0.0",
     "pino": "^9.0.0",
-    "pino-roll": "^2.0.0",
     "pino-http": "^10.0.0",
-    "zod": "^3.23.0",
-    "uuid": "^10.0.0"
+    "pino-roll": "^2.0.0",
+    "uuid": "^10.0.0",
+    "zod": "^3.23.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/uuid": "^10.0.0",
+    "@vitest/coverage-v8": "2.1.9",
     "prisma": "^6.0.0",
+    "supertest": "^7.0.0",
     "tsx": "^4.0.0",
     "typescript": "^5.5.0",
-    "vitest": "^2.0.0",
-    "supertest": "^7.0.0"
+    "vitest": "^2.0.0"
   }
 }

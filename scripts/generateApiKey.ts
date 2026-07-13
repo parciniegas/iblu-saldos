@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 
-import { readFileSync, writeFileSync } from 'fs';
-import { resolve } from 'path';
-import { randomBytes } from 'crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { randomBytes } from 'node:crypto';
+import type { AppConfig } from '../src/api/config.js';
 
 const configPath = resolve('config.json');
 
-let config: any;
+let config: AppConfig;
 
 try {
   const raw = readFileSync(configPath, 'utf-8');

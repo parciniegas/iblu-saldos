@@ -1,4 +1,5 @@
 import { prisma } from './PrismaService.js';
+import type { Prisma, SaldoContable as PrismaSaldoContable } from '@prisma/client';
 import type { ISaldoContableRepository } from '../../application/abstractions/ISaldoContableRepository.js';
 import type { SaldoContableKey } from '../../application/contracts/SaldoContableKey.js';
 import type { SaldoContableUpdateValues } from '../../application/contracts/SaldoContableUpdateValues.js';
@@ -40,7 +41,7 @@ export class SaldoContableRepository implements ISaldoContableRepository {
     if (values.SaldoFinalCredito !== undefined) updateData.saldoFinalCredito = values.SaldoFinalCredito;
     if (values.Cierre !== undefined) updateData.cierre = values.Cierre;
 
-    await (prisma.saldoContable as any).update({ where, data: updateData });
+    await prisma.saldoContable.updateMany({ where, data: updateData });
   }
 
   async getByPeriodo(periodoId: number): Promise<SaldoContable[]> {
@@ -84,7 +85,7 @@ export class SaldoContableRepository implements ISaldoContableRepository {
       data: { updatedAt: now },
     }));
 
-    const operations: any[] = [];
+    const operations: Prisma.PrismaPromise<unknown>[] = [];
     for (const create of creates) {
       operations.push(prisma.saldoContable.create(create));
     }
@@ -97,31 +98,31 @@ export class SaldoContableRepository implements ISaldoContableRepository {
     }
   }
 
-  private toDomain(saldo: any): SaldoContable {
+  private toDomain(saldo: PrismaSaldoContable): SaldoContable {
     return {
       id: Number(saldo.id),
       periodoId: Number(saldo.periodoId),
-      class: saldo.class ?? undefined,
+      class: undefined,
       entidadId: saldo.entidadId ?? undefined,
-      terceroId: saldo.terceroId ?? undefined,
-      cuentaContableId: saldo.cuentaContableId ?? undefined,
-      centroCostoId: saldo.centroCostoId ?? undefined,
+      terceroId: saldo.terceroId != null ? Number(saldo.terceroId) : undefined,
+      cuentaContableId: saldo.cuentaContableId != null ? Number(saldo.cuentaContableId) : undefined,
+      centroCostoId: saldo.centroCostoId != null ? Number(saldo.centroCostoId) : undefined,
       saldoInicialDebito: Number(saldo.saldoInicialDebito),
       saldoInicialCredito: Number(saldo.saldoInicialCredito),
       debito: Number(saldo.debito),
       credito: Number(saldo.credito),
       saldoFinalDebito: Number(saldo.saldoFinalDebito),
       saldoFinalCredito: Number(saldo.saldoFinalCredito),
-      createdAt: saldo.createdAt ?? undefined,
+      createdAt: undefined,
       updatedAt: saldo.updatedAt ?? undefined,
-      libroContableId: saldo.libroContableId ?? undefined,
-      unidadNegocioId: saldo.unidadNegocioId ?? undefined,
-      centroOperacionId: saldo.centroOperacionId ?? undefined,
-      categorizacionId: saldo.categorizacionId ?? undefined,
+      libroContableId: saldo.libroContableId != null ? Number(saldo.libroContableId) : undefined,
+      unidadNegocioId: saldo.unidadNegocioId != null ? Number(saldo.unidadNegocioId) : undefined,
+      centroOperacionId: saldo.centroOperacionId != null ? Number(saldo.centroOperacionId) : undefined,
+      categorizacionId: saldo.categorizacionId != null ? Number(saldo.categorizacionId) : undefined,
       cierre: saldo.cierre,
-      modeloCarteraId: saldo.modeloCarteraId ?? undefined,
+      modeloCarteraId: saldo.modeloCarteraId != null ? Number(saldo.modeloCarteraId) : undefined,
       modeloCartera: saldo.modeloCartera ?? undefined,
-      conceptoTributarioId: saldo.conceptoTributarioId ?? undefined,
+      conceptoTributarioId: saldo.conceptoTributarioId != null ? Number(saldo.conceptoTributarioId) : undefined,
     };
   }
 }

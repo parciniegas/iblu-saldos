@@ -38,6 +38,8 @@ When modifying a file category, review and update the linked files in the same P
 |---|---|---|
 | `src/application/useCases/ProcesarSaldosContablesUseCase.ts` | `src/application/abstractions/IMovimientoContableRepository.ts`, `src/application/abstractions/ISaldoContableRepository.ts`, `__tests__/application/ProcesarSaldosContablesUseCase.test.ts` | Use case contracts and expected behavior must stay aligned. |
 | `src/api/routes/saldos.ts` | `src/api/plugins/auth.ts`, `cli.ts`, `__tests__/api/JobService.test.ts` (and add route tests if needed) | Endpoint behavior, auth assumptions, and user-facing CLI flow are coupled. |
+| `src/api/services/FileBackedJobService.ts` or `src/api/services/createJobService.ts` | `src/api/routes/saldos.ts`, `__tests__/api/FileBackedJobService.test.ts`, `AGENTS.md` | Job persistence behavior and fallback strategy must stay aligned with API flow and docs. |
+| `src/api/routes/health.ts` | `src/infrastructure/messaging/RabbitMqService.ts`, `__tests__/api/routes.test.ts` | Health contracts should reflect real runtime telemetry from messaging and DB integrations. |
 | `src/api/config.ts` or `config.json` | `worker.ts`, `cli.ts`, `src/api/server.ts`, `k8s/configmap.yaml`, `k8s/secret.yaml` | Config keys are shared across API, worker, CLI, and deployment manifests. |
 | `prisma/schema.prisma` | `src/infrastructure/persistence/MovimientoContableRepository.ts`, `src/infrastructure/persistence/SaldoContableRepository.ts`, run `npx prisma generate` | Prisma client and repository queries must match schema changes. |
 | `src/infrastructure/messaging/RabbitMqService.ts` | `worker.ts`, `src/api/routes/saldos.ts` (`/queue` route), `config.json` rabbit settings | Queue publish/consume contracts and config must remain compatible. |

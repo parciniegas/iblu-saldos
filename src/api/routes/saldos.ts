@@ -2,9 +2,15 @@ import { type FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
 import { registerAuthPlugin } from '../plugins/auth.js';
-import { InMemoryJobService } from '../services/InMemoryJobService.js';
+import type { JobStatus } from '../services/JobService.js';
+import { createJobService } from '../services/createJobService.js';
+import { toSaldosQueueMessage } from '../../application/contracts/SaldosQueueMessage.js';
 
-const jobService = new InMemoryJobService();
+const jobService = createJobService();
+const cleanupTimer = setInterval(() => {
+  jobService.cleanup();
+}, 60 * 60 * 1000);
+cleanupTimer.unref?.();
 
 const previewSchema = z.object({
   fechaDesde: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Formato de fecha inválido. Use yyyy-MM-dd'),
@@ -21,17 +27,41 @@ export function registerSaldosRoutes(app: FastifyInstance): void {
 
   const MIN_BATCH_SIZE = 1000;
   const MAX_BATCH_SIZE = 10000;
+  const allowedStatuses = new Set<JobStatus>(['pending', 'processing', 'completed', 'failed']);
+
+  const parseJobStatus = (status?: string): JobStatus | undefined => {
+    if (!status) return undefined;
+    return allowedStatuses.has(status as JobStatus) ? (status as JobStatus) : undefined;
+  };
 
   // GET /api/v1/saldos/jobs
-  app.get('/api/v1/saldos/jobs', async (_request: any, _reply: any) => {
-    const { status, limit } = _request.query as { status?: string; limit?: string };
+  app.get<{ Querystring: { status?: string; limit?: string } }>('/api/v1/saldos/jobs', async (request) => {
+    const { status, limit } = request.query;
 
     const jobs = jobService.listJobs({
-      status: status as any,
-      limit: limit ? parseInt(limit, 10) : 50,
+      status: parseJobStatus(status),
+      limit: limit ? Number.parseInt(limit, 10) : 50,
     });
 
     return jobs;
+  });
+
+  // GET /api/v1/saldos/jobs/metrics
+  app.get('/api/v1/saldos/jobs/metrics', async () => {
+    const all = jobService.listJobs({ limit: 10000 });
+    const metrics = {
+      total: all.length,
+      pending: 0,
+      processing: 0,
+      completed: 0,
+      failed: 0,
+    };
+
+    for (const job of all) {
+      metrics[job.status] += 1;
+    }
+
+    return metrics;
   });
 
   // GET /api/v1/saldos/status/:jobId
@@ -60,10 +90,10 @@ export function registerSaldosRoutes(app: FastifyInstance): void {
       }
 
       const { fechaDesde, batchSize } = parsed.data;
-      const config = (app as any).config;
+      const config = app.config;
       const effectiveBatchSize = Math.min(MAX_BATCH_SIZE, Math.max(MIN_BATCH_SIZE, batchSize ?? config?.procesamientoMovimientos?.batchSizeDefault ?? 1000));
 
-      const movimientoRepo = (app as any).movimientoRepo;
+      const movimientoRepo = app.movimientoRepo;
 
       if (!movimientoRepo) {
         return reply.status(503).send({ error: 'Base de datos no disponible' });
@@ -99,13 +129,13 @@ export function registerSaldosRoutes(app: FastifyInstance): void {
       }
 
       const { fechaDesde, batchSize } = parsed.data;
-      const config = (app as any).config;
+      const config = app.config;
       const effectiveBatchSize = Math.min(MAX_BATCH_SIZE, Math.max(MIN_BATCH_SIZE, batchSize ?? config?.procesamientoMovimientos?.batchSizeDefault ?? 1000));
 
       const jobId = uuidv4();
       jobService.createJob(jobId, fechaDesde, effectiveBatchSize);
 
-      const useCase = (app as any).useCase;
+      const useCase = app.useCase;
 
       if (!useCase) {
         jobService.updateJob(jobId, { status: 'failed', error: 'Use case no disponible' });
@@ -175,18 +205,23 @@ export function registerSaldosRoutes(app: FastifyInstance): void {
       }
 
       const { fechaDesde, batchSize } = parsed.data;
-      const config = (app as any).config;
+      const config = app.config;
       const effectiveBatchSize = Math.min(MAX_BATCH_SIZE, Math.max(MIN_BATCH_SIZE, batchSize ?? config?.procesamientoMovimientos?.batchSizeDefault ?? 1000));
 
-      const rabbitMqService = (app as any).rabbitMqService;
+      const rabbitMqService = app.rabbitMqService;
 
       if (!rabbitMqService) {
         return reply.status(503).send({ error: 'RabbitMQ no disponible' });
       }
 
       const queueName = config.rabbitMq.queueName;
+      const queueMessage = toSaldosQueueMessage({
+        version: 1,
+        fechaDesde,
+        batchSize: effectiveBatchSize,
+      });
 
-      await rabbitMqService.publish(queueName, { fechaDesde, batchSize: effectiveBatchSize });
+      await rabbitMqService.publish(queueName, queueMessage);
 
       return reply.send({
         published: true,

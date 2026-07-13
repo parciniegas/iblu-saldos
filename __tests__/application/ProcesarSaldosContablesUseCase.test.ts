@@ -34,6 +34,54 @@ function createMockRepositories(): {
 }
 
 describe('ProcesarSaldosContablesUseCase', () => {
+  it('debe persistir saldos nuevos agregados en el periodo', async () => {
+    const { movimientoRepo, saldoRepo } = createMockRepositories();
+
+    movimientoRepo.getPeriodosDesdeFecha.mockResolvedValue([1]);
+    movimientoRepo.getBatchByPeriodo
+      .mockResolvedValueOnce([{ id: 10 } as MovimientoContable])
+      .mockResolvedValueOnce([]);
+    movimientoRepo.getCuentasAgrupadasPorMovimientos.mockResolvedValue([
+      {
+        MovimientoContableId: 10,
+        PeriodoId: 1,
+        CuentaContableId: 1105,
+        TerceroId: 200,
+        CentroCostoId: 10,
+        LibroContableId: 1,
+        UnidadNegocioId: 1,
+        CentroOperacionId: 1,
+        CategorizacionId: 1,
+        ModeloCarteraId: 1,
+        ModeloCartera: 'A',
+        ConceptoTributarioId: 1,
+        Debito: 100,
+        Credito: 25,
+        RegistrosMovimientoContableCuenta: 1,
+      } as MovimientoContableCuentaAgrupadaRow,
+    ]);
+
+    saldoRepo.getByPeriodo
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const useCase = new ProcesarSaldosContablesUseCase(
+      movimientoRepo,
+      saldoRepo,
+      mockLogger,
+    );
+
+    const result = await useCase.execute('2024-01-01', 1000, 'test-job');
+
+    expect(result.status).toBe('completed');
+    expect(saldoRepo.bulkUpdate).toHaveBeenCalledTimes(1);
+    const [bulkPayload] = (saldoRepo.bulkUpdate as any).mock.calls[0];
+    expect(bulkPayload).toHaveLength(1);
+    expect(bulkPayload[0].debito).toBe(100);
+    expect(bulkPayload[0].credito).toBe(25);
+  });
+
   it('debe clamp batch size a [1000, 10000]', async () => {
     const { movimientoRepo, saldoRepo } = createMockRepositories();
 

@@ -5,6 +5,7 @@ import { MovimientoContableRepository } from './infrastructure/persistence/Movim
 import { SaldoContableRepository } from './infrastructure/persistence/SaldoContableRepository.js';
 import { ProcesarSaldosContablesUseCase } from './application/useCases/ProcesarSaldosContablesUseCase.js';
 import { RabbitMqServiceImpl, type RabbitMqSettings } from './infrastructure/messaging/RabbitMqService.js';
+import { saldosQueueMessageSchema, toSaldosQueueMessage } from './application/contracts/SaldosQueueMessage.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const config: AppConfig = loadConfig();
@@ -25,11 +26,6 @@ const logger = pino({
 
 setPrismaLogger(logger);
 
-interface WorkerMessage {
-  fechaDesde: string;
-  batchSize: number;
-}
-
 async function startWorker(): Promise<void> {
   try {
     await connectPrisma();
@@ -48,11 +44,27 @@ async function startWorker(): Promise<void> {
   await rabbitMqService.connect();
 
   const queueName = config.rabbitMq.queueName;
+  let invalidMessagesCount = 0;
+  let processedMessagesCount = 0;
 
-  await rabbitMqService.consume(queueName, async (message: WorkerMessage) => {
+  await rabbitMqService.consume(queueName, async (message: unknown) => {
+    const parsedMessage = saldosQueueMessageSchema.safeParse(message);
+    if (!parsedMessage.success) {
+      invalidMessagesCount += 1;
+      logger.error({
+        errors: parsedMessage.error.issues,
+        rawMessage: message,
+        invalidMessagesCount,
+        processedMessagesCount,
+      }, '[WORKER] Mensaje inválido, descartado');
+      return;
+    }
+
+    const normalizedMessage = toSaldosQueueMessage(parsedMessage.data);
+    processedMessagesCount += 1;
     const jobId = uuidv4();
-    const fechaDesde = message.fechaDesde;
-    const batchSize = message.batchSize || config.procesamientoMovimientos.batchSizeDefault;
+    const fechaDesde = normalizedMessage.fechaDesde;
+    const batchSize = normalizedMessage.batchSize || config.procesamientoMovimientos.batchSizeDefault;
 
     logger.info({ jobId, fechaDesde, batchSize }, '[WORKER] Recibido mensaje de procesamiento');
 
@@ -87,7 +99,9 @@ async function startWorker(): Promise<void> {
   });
 }
 
-startWorker().catch((error) => {
+try {
+  await startWorker();
+} catch (error) {
   logger.error({ error: error instanceof Error ? error.message : String(error) }, 'Error iniciando worker');
   process.exit(1);
-});
+}

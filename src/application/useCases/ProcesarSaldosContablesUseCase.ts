@@ -21,6 +21,11 @@ export type JobResult = {
 const MIN_BATCH_SIZE = 1000;
 const MAX_BATCH_SIZE = 10000;
 
+type PeriodProcessingResult = {
+  totalPeriodMovimientos: number;
+  totalPeriodCuentas: number;
+};
+
 export class ProcesarSaldosContablesUseCase {
   constructor(
     private readonly movimientoRepo: IMovimientoContableRepository,
@@ -46,61 +51,17 @@ export class ProcesarSaldosContablesUseCase {
     try {
       const periodos = await this.movimientoRepo.getPeriodosDesdeFecha(fechaDesdeDate);
       this.logger.info({ jobId, periodosCount: periodos.length }, '[SALDOS] Periodos encontrados');
+      const priorPeriodById = this.buildPriorPeriodMap(periodos);
 
       const periodTimes: number[] = [];
 
       for (const periodoId of periodos) {
         const periodoStart = Date.now();
-
-        // Zero-initialize existing saldos for this period
-        await this.zeroInitializePeriod(periodoId, effectiveBatchSize);
-
-        // Get all movements for this period
-        let lastId: number | undefined;
-        let batch: typeof this.movimientoRepo.getBatchByPeriodo extends (...a: any[]) => Promise<infer R> ? R : never;
-        let totalPeriodMovimientos = 0;
-        let totalPeriodCuentas = 0;
-
-        do {
-          batch = await this.movimientoRepo.getBatchByPeriodo(periodoId, effectiveBatchSize, lastId);
-          if (batch.length === 0) break;
-
-          // Get aggregated cuentas for this batch
-          const movimientoIds = batch.map((m) => m.id);
-          const cuentasAgrupadas = await this.movimientoRepo.getCuentasAgrupadasPorMovimientos(movimientoIds);
-
-          // Process each aggregated account row
-          for (const cuenta of cuentasAgrupadas) {
-            const key: SaldoContableKey = {
-              PeriodoId: periodoId,
-              TerceroId: cuenta.TerceroId,
-              CuentaContableId: cuenta.CuentaContableId,
-              CentroCostoId: cuenta.CentroCostoId,
-            };
-
-            let saldo = await this.saldoRepo.getByKey(key);
-
-            if (!saldo) {
-              saldo = this.createEmptySaldo(periodoId, cuenta);
-            }
-
-            saldo.debito += cuenta.Debito;
-            saldo.credito += cuenta.Credito;
-            totalPeriodCuentas++;
-          }
-
-          totalPeriodMovimientos += batch.length;
-          lastId = batch.at(-1)!.id;
-        } while (batch.length >= effectiveBatchSize);
-
-        // Compute SaldoInicial from prior period's SaldoFinal
-        await this.computePeriodSaldos(periodoId, totalPeriodCuentas);
-
-        // Bulk update all saldos for this period
-        const saldosDelPeriodo = await this.saldoRepo.getByPeriodo(periodoId);
-        if (saldosDelPeriodo.length > 0) {
-          await this.saldoRepo.bulkUpdate(saldosDelPeriodo);
-        }
+        const { totalPeriodMovimientos, totalPeriodCuentas } = await this.processPeriodo(
+          periodoId,
+          effectiveBatchSize,
+          priorPeriodById.get(periodoId) ?? null,
+        );
 
         const periodoTiempo = Date.now() - periodoStart;
         periodTimes.push(periodoTiempo);
@@ -159,7 +120,7 @@ export class ProcesarSaldosContablesUseCase {
         jobId,
         status: 'failed',
         fechaDesde,
-        batchSize,
+        batchSize: effectiveBatchSize,
         periodosProcesados: periodosProcesados,
         movimientosProcesados: totalMovimientosProcesados,
         movimientosCuentaProcesados: totalMovimientosCuentaProcesados,
@@ -167,6 +128,83 @@ export class ProcesarSaldosContablesUseCase {
         error: errorMessage,
       };
     }
+  }
+
+  private buildPriorPeriodMap(periodos: number[]): Map<number, number | null> {
+    const priorPeriodById = new Map<number, number | null>();
+
+    for (let i = 0; i < periodos.length; i++) {
+      const current = periodos[i];
+      if (current === undefined) continue;
+      priorPeriodById.set(current, i > 0 ? periodos[i - 1] ?? null : null);
+    }
+
+    return priorPeriodById;
+  }
+
+  private async processPeriodo(
+    periodoId: number,
+    batchSize: number,
+    priorPeriodId: number | null,
+  ): Promise<PeriodProcessingResult> {
+    await this.zeroInitializePeriod(periodoId, batchSize);
+
+    const saldosDelPeriodo = await this.saldoRepo.getByPeriodo(periodoId);
+    const saldosByKey = new Map<string, SaldoContable>();
+
+    for (const saldo of saldosDelPeriodo) {
+      saldosByKey.set(
+        this.buildSaldoKey(periodoId, saldo.terceroId, saldo.cuentaContableId, saldo.centroCostoId),
+        saldo,
+      );
+    }
+
+    let lastId: number | undefined;
+    let batch: Awaited<ReturnType<IMovimientoContableRepository['getBatchByPeriodo']>>;
+    let totalPeriodMovimientos = 0;
+    let totalPeriodCuentas = 0;
+
+    do {
+      batch = await this.movimientoRepo.getBatchByPeriodo(periodoId, batchSize, lastId);
+      if (batch.length === 0) break;
+
+      const movimientoIds = batch.map((m) => m.id);
+      const cuentasAgrupadas = await this.movimientoRepo.getCuentasAgrupadasPorMovimientos(movimientoIds);
+
+      for (const cuenta of cuentasAgrupadas) {
+        const saldoKey = this.buildSaldoKey(
+          periodoId,
+          cuenta.TerceroId,
+          cuenta.CuentaContableId,
+          cuenta.CentroCostoId,
+        );
+        let saldo = saldosByKey.get(saldoKey);
+
+        if (!saldo) {
+          saldo = this.createEmptySaldo(periodoId, cuenta);
+          saldosByKey.set(saldoKey, saldo);
+        }
+
+        saldo.debito += cuenta.Debito;
+        saldo.credito += cuenta.Credito;
+        totalPeriodCuentas++;
+      }
+
+      totalPeriodMovimientos += batch.length;
+      lastId = batch.at(-1)!.id;
+    } while (batch.length >= batchSize);
+
+    const saldosActualizados = Array.from(saldosByKey.values());
+    if (saldosActualizados.length > 0) {
+      await this.saldoRepo.bulkUpdate(saldosActualizados);
+    }
+
+    await this.computePeriodSaldos(periodoId, totalPeriodCuentas, priorPeriodId);
+
+    return {
+      totalPeriodMovimientos,
+      totalPeriodCuentas,
+    };
   }
 
   private async zeroInitializePeriod(periodoId: number, batchSize: number): Promise<void> {
@@ -190,10 +228,8 @@ export class ProcesarSaldosContablesUseCase {
     }
   }
 
-  private async computePeriodSaldos(periodoId: number, cuentasProcesadas: number): Promise<void> {
+  private async computePeriodSaldos(periodoId: number, cuentasProcesadas: number, priorPeriodId: number | null): Promise<void> {
     if (cuentasProcesadas === 0) return;
-
-    const priorPeriodId = await this.getPriorPeriodId(periodoId);
 
     const saldos = await this.saldoRepo.getByPeriodo(periodoId);
 
@@ -208,7 +244,7 @@ export class ProcesarSaldosContablesUseCase {
       let saldoInicialDebito: number = 0;
       let saldoInicialCredito: number = 0;
 
-      if (priorPeriodId) {
+      if (priorPeriodId !== null) {
         const priorSaldo = await this.saldoRepo.getByKey({
           PeriodoId: priorPeriodId,
           TerceroId: saldo.terceroId,
@@ -236,6 +272,10 @@ export class ProcesarSaldosContablesUseCase {
     }
   }
 
+  private buildSaldoKey(periodoId: number, terceroId?: number, cuentaContableId?: number, centroCostoId?: number): string {
+    return [periodoId, terceroId ?? 'null', cuentaContableId ?? 'null', centroCostoId ?? 'null'].join('|');
+  }
+
   private createEmptySaldo(periodoId: number, cuenta: MovimientoContableCuentaAgrupadaRow): SaldoContable {
     return {
       id: 0,
@@ -260,13 +300,6 @@ export class ProcesarSaldosContablesUseCase {
       modeloCartera: cuenta.ModeloCartera,
       conceptoTributarioId: cuenta.ConceptoTributarioId,
     };
-  }
-
-  private async getPriorPeriodId(currentPeriodId: number): Promise<number | null> {
-    const periodos = await this.movimientoRepo.getPeriodosDesdeFecha(new Date('2000-01-01'));
-    const idx = periodos.indexOf(currentPeriodId);
-    if (idx <= 0) return null;
-    return periodos[idx - 1] ?? null;
   }
 
   private formatMs(ms: number): string {

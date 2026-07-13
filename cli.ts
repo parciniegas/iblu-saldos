@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import { readFileSync } from 'fs';
-import { resolve, join } from 'path';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 const MIN_BATCH_SIZE = 1000;
 const MAX_BATCH_SIZE = 10000;
@@ -77,7 +77,7 @@ function loadConfig(): { fechaDesdeDefault: string; batchSizeDefault: number } {
 
 async function preview(args: Record<string, string>, config: any): Promise<void> {
   const fechaDesde = args['fecha-desde'] || config.fechaDesdeDefault;
-  const batchSize = args['batch-size'] ? parseInt(args['batch-size'], 10) : config.batchSizeDefault;
+  const batchSize = args['batch-size'] ? Number.parseInt(args['batch-size'], 10) : config.batchSizeDefault;
   const apiKey = args['api-key'];
   const apiUrl = args['api-url'] || 'http://localhost:3000';
 
@@ -113,7 +113,7 @@ async function preview(args: Record<string, string>, config: any): Promise<void>
 
 async function procesar(args: Record<string, string>, config: any): Promise<void> {
   const fechaDesde = args['fecha-desde'] || config.fechaDesdeDefault;
-  const batchSize = args['batch-size'] ? parseInt(args['batch-size'], 10) : config.batchSizeDefault;
+  const batchSize = args['batch-size'] ? Number.parseInt(args['batch-size'], 10) : config.batchSizeDefault;
   const apiKey = args['api-key'];
   const apiUrl = args['api-url'] || 'http://localhost:3000';
 
@@ -187,7 +187,7 @@ async function procesar(args: Record<string, string>, config: any): Promise<void
 
 async function queue(args: Record<string, string>, config: any): Promise<void> {
   const fechaDesde = args['fecha-desde'] || config.fechaDesdeDefault;
-  const batchSize = args['batch-size'] ? parseInt(args['batch-size'], 10) : config.batchSizeDefault;
+  const batchSize = args['batch-size'] ? Number.parseInt(args['batch-size'], 10) : config.batchSizeDefault;
   const apiKey = args['api-key'];
   const apiUrl = args['api-url'] || 'http://localhost:3000';
 
@@ -298,7 +298,9 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error) => {
+try {
+  await main();
+} catch (error) {
   console.error('Error:', error instanceof Error ? error.message : String(error));
   process.exit(1);
-});
+}
