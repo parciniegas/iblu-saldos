@@ -5,12 +5,6 @@ import { registerAuthPlugin } from '../plugins/auth.js';
 import type { JobStatus } from '../services/JobService.js';
 import { createJobService } from '../services/createJobService.js';
 
-const jobService = createJobService();
-const cleanupTimer = setInterval(() => {
-  jobService.cleanup();
-}, 60 * 60 * 1000);
-cleanupTimer.unref?.();
-
 const previewSchema = z.object({
   fechaDesde: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Formato de fecha inválido. Use yyyy-MM-dd'),
   batchSize: z.number().int().positive().optional(),
@@ -23,14 +17,41 @@ const procesarSchema = z.object({
 
 export function registerSaldosRoutes(app: FastifyInstance): void {
   registerAuthPlugin(app);
+  const jobService = createJobService();
+  const cleanupTimer = setInterval(() => {
+    jobService.cleanup();
+  }, 60 * 60 * 1000);
+  cleanupTimer.unref?.();
 
   const MIN_BATCH_SIZE = 1000;
   const MAX_BATCH_SIZE = 10000;
-  const allowedStatuses = new Set<JobStatus>(['pending', 'processing', 'completed', 'failed']);
+  const allowedStatuses = new Set<JobStatus>(['pending', 'processing', 'completed', 'failed', 'canceled']);
 
   const parseJobStatus = (status?: string): JobStatus | undefined => {
     if (!status) return undefined;
     return allowedStatuses.has(status as JobStatus) ? (status as JobStatus) : undefined;
+  };
+
+  const updateWhileProcessing = (
+    jobId: string,
+    updates: Parameters<typeof jobService.updateJob>[1],
+    context: string,
+    allowedCurrentStatuses: JobStatus[] = ['processing'],
+  ): boolean => {
+    const current = jobService.getJob(jobId);
+
+    if (!current) {
+      app.log.warn({ jobId, context }, 'No se actualiza job porque no existe');
+      return false;
+    }
+
+    if (!allowedCurrentStatuses.includes(current.status)) {
+      app.log.warn({ jobId, context, currentStatus: current.status, allowedCurrentStatuses }, 'No se actualiza job porque no está en un estado permitido');
+      return false;
+    }
+
+    jobService.updateJob(jobId, updates);
+    return true;
   };
 
   // GET /api/v1/saldos/jobs
@@ -43,7 +64,7 @@ export function registerSaldosRoutes(app: FastifyInstance): void {
       querystring: {
         type: 'object',
         properties: {
-          status: { type: 'string', enum: ['pending', 'processing', 'completed', 'failed'] },
+          status: { type: 'string', enum: ['pending', 'processing', 'completed', 'failed', 'canceled'] },
           limit: { type: 'string' },
         },
       },
@@ -81,6 +102,7 @@ export function registerSaldosRoutes(app: FastifyInstance): void {
             processing: { type: 'number' },
             completed: { type: 'number' },
             failed: { type: 'number' },
+            canceled: { type: 'number' },
           },
         },
       },
@@ -93,6 +115,7 @@ export function registerSaldosRoutes(app: FastifyInstance): void {
       processing: 0,
       completed: 0,
       failed: 0,
+      canceled: 0,
     };
 
     for (const job of all) {
@@ -155,6 +178,7 @@ export function registerSaldosRoutes(app: FastifyInstance): void {
       response: {
         200: { type: 'object', additionalProperties: true },
         400: { type: 'object', additionalProperties: true },
+        409: { type: 'object', additionalProperties: true },
         503: { type: 'object', additionalProperties: true },
       },
     },
@@ -239,6 +263,14 @@ export function registerSaldosRoutes(app: FastifyInstance): void {
       const config = app.config;
       const effectiveBatchSize = Math.min(MAX_BATCH_SIZE, Math.max(MIN_BATCH_SIZE, batchSize ?? config?.procesamientoMovimientos?.batchSizeDefault ?? 1000));
 
+      const runningJob = jobService.listJobs({ status: 'processing', limit: 1 }).at(0);
+      if (runningJob) {
+        return reply.status(409).send({
+          error: 'Ya existe un job en ejecución',
+          runningJobId: runningJob.jobId,
+        });
+      }
+
       const jobId = uuidv4();
       jobService.createJob(jobId, fechaDesde, effectiveBatchSize);
 
@@ -252,24 +284,28 @@ export function registerSaldosRoutes(app: FastifyInstance): void {
       // Start processing in background
       (async () => {
         try {
-          jobService.updateJob(jobId, { status: 'processing' });
+          updateWhileProcessing(jobId, { status: 'processing' }, 'inicio procesamiento', ['pending', 'processing']);
 
           const result = await useCase.execute(fechaDesde, effectiveBatchSize, jobId, {
             progressIntervalMs: 2000,
+            shouldCancel: () => {
+              const current = jobService.getJob(jobId);
+              return current?.status === 'canceled';
+            },
             onProgress: (progress) => {
-              jobService.updateJob(jobId, {
+              updateWhileProcessing(jobId, {
                 status: progress.status,
                 periodosProcesados: progress.periodosProcesados,
                 movimientosProcesados: progress.movimientosProcesados,
                 movimientosCuentaProcesados: progress.movimientosCuentaProcesados,
                 tiempoTotalMs: progress.tiempoTotalMs,
                 eta: progress.eta,
-              });
+              }, 'progreso');
             },
           });
 
           if (result.status === 'completed') {
-            jobService.updateJob(jobId, {
+            updateWhileProcessing(jobId, {
               status: 'completed',
               periodosProcesados: result.periodosProcesados,
               movimientosProcesados: result.movimientosProcesados,
@@ -283,16 +319,26 @@ export function registerSaldosRoutes(app: FastifyInstance): void {
                 tiempoTotalMs: result.tiempoTotalMs,
                 eta: result.eta,
               },
-            });
+            }, 'resultado completed');
+          } else if (result.status === 'canceled') {
+            updateWhileProcessing(jobId, {
+              status: 'canceled',
+              periodosProcesados: result.periodosProcesados,
+              movimientosProcesados: result.movimientosProcesados,
+              movimientosCuentaProcesados: result.movimientosCuentaProcesados,
+              tiempoTotalMs: result.tiempoTotalMs,
+              eta: result.eta,
+              error: result.error,
+            }, 'resultado canceled');
           } else {
-            jobService.updateJob(jobId, {
+            updateWhileProcessing(jobId, {
               status: 'failed',
               error: result.error,
-            });
+            }, 'resultado failed');
           }
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
-          jobService.updateJob(jobId, { status: 'failed', error: errorMessage });
+          updateWhileProcessing(jobId, { status: 'failed', error: errorMessage }, 'error en ejecución');
         }
       })();
 
@@ -309,6 +355,55 @@ export function registerSaldosRoutes(app: FastifyInstance): void {
       app.log.error({ error: errorMessage }, 'Error en procesar');
       return reply.status(500).send({ error: 'Error interno', detail: errorMessage });
     }
+  });
+
+  // POST /api/v1/saldos/cancel/:jobId
+  app.post<{ Params: { jobId: string } }>('/api/v1/saldos/cancel/:jobId', {
+    schema: {
+      tags: ['Saldos'],
+      security: [{ apiKey: [] }],
+      summary: 'Cancelar un job en ejecución',
+      params: {
+        type: 'object',
+        required: ['jobId'],
+        properties: {
+          jobId: { type: 'string' },
+        },
+      },
+      response: {
+        202: { type: 'object', additionalProperties: true },
+        404: { type: 'object', additionalProperties: true },
+        409: { type: 'object', additionalProperties: true },
+      },
+    },
+  }, async (request, reply) => {
+    const { jobId } = request.params;
+    const job = jobService.getJob(jobId);
+
+    if (!job) {
+      return reply.status(404).send({ error: 'Job no encontrado', jobId });
+    }
+
+    if (job.status === 'processing') {
+      const canceled = jobService.updateJob(jobId, {
+        status: 'canceled',
+        error: 'Cancelado por solicitud del usuario',
+      });
+
+      return reply.status(202).send({
+        jobId,
+        status: canceled?.status ?? 'canceled',
+      });
+    }
+
+    const error = `No se pudo cancelar: el job no está en ejecución (estado actual: ${job.status}).`;
+    app.log.warn({ jobId, currentStatus: job.status }, error);
+
+    return reply.status(409).send({
+      jobId,
+      status: job.status,
+      error,
+    });
   });
 
 }

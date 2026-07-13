@@ -1,4 +1,4 @@
-export type JobStatus = 'pending' | 'processing' | 'completed' | 'failed';
+export type JobStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'canceled';
 
 export type Job = {
   jobId: string;

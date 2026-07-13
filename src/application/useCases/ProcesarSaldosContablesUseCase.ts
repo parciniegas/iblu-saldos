@@ -7,7 +7,7 @@ import pino from 'pino';
 
 export type JobResult = {
   jobId: string;
-  status: 'completed' | 'failed';
+  status: 'completed' | 'failed' | 'canceled';
   fechaDesde: string;
   batchSize: number;
   periodosProcesados: number;
@@ -33,6 +33,7 @@ export type JobProgress = {
 type ExecuteOptions = {
   onProgress?: (progress: JobProgress) => void;
   progressIntervalMs?: number;
+  shouldCancel?: () => boolean;
 };
 
 const MIN_BATCH_SIZE = 1000;
@@ -40,6 +41,7 @@ const MAX_BATCH_SIZE = 10000;
 const DEFAULT_PROGRESS_PERCENT_STEP = 5;
 const DEFAULT_BATCH_LOG_STEP = 10;
 const DEFAULT_PROGRESS_INTERVAL_MS = 3000;
+const CANCELED_ERROR_CODE = 'JOB_CANCELED';
 
 type PeriodProcessingResult = {
   totalPeriodMovimientos: number;
@@ -115,7 +117,16 @@ export class ProcesarSaldosContablesUseCase {
       });
     };
 
+    const ensureNotCanceled = (): void => {
+      if (options?.shouldCancel?.()) {
+        const canceledError = new Error('Job cancelado por solicitud del usuario.');
+        canceledError.name = CANCELED_ERROR_CODE;
+        throw canceledError;
+      }
+    };
+
     try {
+      ensureNotCanceled();
       const periodos = await this.movimientoRepo.getPeriodosDesdeFecha(fechaDesdeDate);
       this.logger.info({ jobId, periodosCount: periodos.length }, '[SALDOS] Periodos encontrados');
       const priorPeriodById = this.buildPriorPeriodMap(periodos);
@@ -124,6 +135,7 @@ export class ProcesarSaldosContablesUseCase {
       let periodTimesTotal = 0;
 
       for (const periodoId of periodos) {
+        ensureNotCanceled();
         const periodoStart = Date.now();
         const { totalPeriodMovimientos, totalPeriodCuentas } = await this.processPeriodo(
           periodoId,
@@ -131,6 +143,7 @@ export class ProcesarSaldosContablesUseCase {
           priorPeriodById.get(periodoId) ?? null,
           batchLogStep,
           progressPercentStep,
+          ensureNotCanceled,
           (currentPeriodMovimientos, currentPeriodCuentas) => {
             periodoMovimientosEnCurso = currentPeriodMovimientos;
             periodoCuentasEnCurso = currentPeriodCuentas;
@@ -195,6 +208,22 @@ export class ProcesarSaldosContablesUseCase {
       const tiempoTotal = Date.now() - inicio;
       const errorMessage = error instanceof Error ? error.message : String(error);
 
+      if (error instanceof Error && error.name === CANCELED_ERROR_CODE) {
+        this.logger.info({ jobId, tiempoTotalMs: tiempoTotal }, '[SALDOS] Procesamiento cancelado');
+
+        return {
+          jobId,
+          status: 'canceled',
+          fechaDesde,
+          batchSize: effectiveBatchSize,
+          periodosProcesados,
+          movimientosProcesados: totalMovimientosProcesados,
+          movimientosCuentaProcesados: totalMovimientosCuentaProcesados,
+          tiempoTotalMs: tiempoTotal,
+          error: errorMessage,
+        };
+      }
+
       this.logger.error({ jobId, error: errorMessage, tiempoTotalMs: tiempoTotal }, '[SALDOS] Error en procesamiento');
 
       return {
@@ -229,8 +258,10 @@ export class ProcesarSaldosContablesUseCase {
     priorPeriodId: number | null,
     batchLogStep: number,
     progressPercentStep: number,
+    ensureNotCanceled: () => void,
     onPeriodProgress?: (movimientosProcesados: number, cuentasProcesadas: number) => void,
   ): Promise<PeriodProcessingResult> {
+    ensureNotCanceled();
     const { saldos: saldosDelPeriodo, resetCount } = await this.zeroInitializePeriod(periodoId, batchSize);
     this.logger.info({ periodoId, saldosInicializados: resetCount }, '[SALDOS] Saldos del periodo inicializados');
 
@@ -250,6 +281,7 @@ export class ProcesarSaldosContablesUseCase {
     let batchIndex = 0;
 
     do {
+      ensureNotCanceled();
       batch = await this.movimientoRepo.getBatchByPeriodo(periodoId, batchSize, lastId);
       if (batch.length === 0) break;
       batchIndex++;
@@ -298,6 +330,7 @@ export class ProcesarSaldosContablesUseCase {
     } while (batch.length >= batchSize);
 
     const saldosActualizados = Array.from(saldosByKey.values());
+    ensureNotCanceled();
     await this.computePeriodSaldos(periodoId, saldosActualizados, totalPeriodCuentas, priorPeriodId, progressPercentStep);
 
     return {

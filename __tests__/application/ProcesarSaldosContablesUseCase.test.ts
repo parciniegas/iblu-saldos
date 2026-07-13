@@ -206,4 +206,26 @@ describe('ProcesarSaldosContablesUseCase', () => {
     expect(lastCall?.status).toBe('processing');
     expect(lastCall?.movimientosProcesados).toBeGreaterThanOrEqual(1);
   });
+
+  it('debe cancelar el procesamiento cuando shouldCancel es true', async () => {
+    const { movimientoRepo, saldoRepo } = createMockRepositories();
+
+    movimientoRepo.getPeriodosDesdeFecha.mockResolvedValue([1, 2]);
+    saldoRepo.getByPeriodo.mockResolvedValue([]);
+
+    const useCase = new ProcesarSaldosContablesUseCase(
+      movimientoRepo,
+      saldoRepo,
+      mockLogger,
+    );
+
+    const result = await useCase.execute('2024-01-01', 1000, 'test-cancel-job', {
+      shouldCancel: () => true,
+      progressIntervalMs: 0,
+    });
+
+    expect(result.status).toBe('canceled');
+    expect(result.error).toContain('cancelado');
+    expect(result.jobId).toBe('test-cancel-job');
+  });
 });
