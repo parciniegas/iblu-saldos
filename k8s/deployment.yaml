@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: saldos-api
+  labels:
+    app: saldos
+    component: api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: saldos
+      component: api
+  template:
+    metadata:
+      labels:
+        app: saldos
+        component: api
+    spec:
+      containers:
+        - name: saldos-api
+          image: saldos-api:latest
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: saldos-config
+            - secretRef:
+                name: saldos-secret
+          env:
+            - name: ConnectionStrings__MariaDb
+              valueFrom:
+                secretKeyRef:
+                  name: saldos-secret
+                  key: DATABASE_URL
+            - name: X-API-Key
+              valueFrom:
+                secretKeyRef:
+                  name: saldos-secret
+                  key: API_KEY
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/detailed
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 3
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: saldos-worker
+  labels:
+    app: saldos
+    component: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: saldos
+      component: worker
+  template:
+    metadata:
+      labels:
+        app: saldos
+        component: worker
+    spec:
+      containers:
+        - name: saldos-worker
+          image: saldos-worker:latest
+          envFrom:
+            - configMapRef:
+                name: saldos-config
+            - secretRef:
+                name: saldos-secret
+          env:
+            - name: ConnectionStrings__MariaDb
+              valueFrom:
+                secretKeyRef:
+                  name: saldos-secret
+                  key: DATABASE_URL
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"

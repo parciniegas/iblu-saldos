@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: saldos-config
+  labels:
+    app: saldos
+data:
+  config.json: |
+    {
+      "connectionString": {
+        "mariaDb": "mysql://root:PASSWORD@HOST:3306/cuentas"
+      },
+      "apiKeys": {
+        "allowedKeys": ["API_KEY_PLACEHOLDER"]
+      },
+      "procesamientoMovimientos": {
+        "fechaDesdeDefault": "2000-01-01",
+        "batchSizeDefault": 1000
+      },
+      "rabbitMq": {
+        "hostName": "rabbitmq",
+        "port": 5672,
+        "userName": "admin",
+        "password": "PASSWORD",
+        "virtualHost": "/",
+        "queueName": "saldos"
+      },
+      "logging": {
+        "level": "info",
+        "filePath": "logs/saldos-worker-.json",
+        "rollingInterval": "day"
+      },
+      "server": {
+        "port": 3000,
+        "host": "0.0.0.0"
+      }
+    }
+  NODE_ENV: production

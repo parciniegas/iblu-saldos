@@ -1,0 +1,29 @@
+{
+  "connectionString": {
+    "mariaDb": "mysql://pad:P2ssw0rd!d@docker:3306/cuentas"
+  },
+  "apiKeys": {
+    "allowedKeys": []
+  },
+  "procesamientoMovimientos": {
+    "fechaDesdeDefault": "2000-01-01",
+    "batchSizeDefault": 1000
+  },
+  "rabbitMq": {
+    "hostName": "localhost",
+    "port": 5672,
+    "userName": "admin",
+    "password": "P2ssw0rd",
+    "virtualHost": "/",
+    "queueName": "saldos"
+  },
+  "logging": {
+    "level": "info",
+    "filePath": "logs/saldos-worker-.json",
+    "rollingInterval": "day"
+  },
+  "server": {
+    "port": 3000,
+    "host": "0.0.0.0"
+  }
+}

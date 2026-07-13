@@ -1,0 +1,47 @@
+name: Feature request
+description: Propose an enhancement for API, worker, processing logic, or operations
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What problem are you trying to solve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the desired behavior and scope
+    validations:
+      required: true
+
+  - type: dropdown
+    id: impact-area
+    attributes:
+      label: Primary area
+      options:
+        - API routes
+        - Worker queue processing
+        - Core use case
+        - Prisma persistence
+        - CLI
+        - Kubernetes/deployment
+    validations:
+      required: true
+
+  - type: textarea
+    id: test-plan
+    attributes:
+      label: Test plan
+      description: How should this be validated?
+      placeholder: Unit tests, integration tests, manual API/CLI checks
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional

@@ -1,0 +1,61 @@
+name: Bug report
+description: Report a defect or regression in API, worker, or CLI
+labels:
+  - bug
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Clear description of the bug and impact
+      placeholder: Describe what is broken and why it matters
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide reproducible steps
+      placeholder: |
+        1. Start API with npm start
+        2. Call POST /api/v1/saldos/procesar
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: input
+    id: area
+    attributes:
+      label: Affected area
+      description: Main area touched by this bug
+      placeholder: api | worker | cli | prisma | rabbitmq | k8s
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / stack traces
+      description: Paste relevant logs, redacting secrets
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Verification
+      options:
+        - label: I confirmed this is not caused by local credential/config differences.
+        - label: I checked existing issues for duplicates.

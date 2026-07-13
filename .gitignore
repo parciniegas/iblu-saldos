@@ -1,0 +1,12 @@
+node_modules
+dist
+.env
+.env.*
+*.log
+logs/*.json
+.DS_Store
+coverage
+.vscode
+.idea
+*.tgz
+prisma/migrations
