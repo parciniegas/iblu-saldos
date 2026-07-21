@@ -1,6 +1,6 @@
 {
   "connectionString": {
-    "mariaDb": "mysql://pad:P2ssw0rd!d@docker:3306/cuentas"
+    "mariaDb": "mysql://root:P2ssw0rd!@127.0.0.1:3306/cuentas"
   },
   "apiKeys": {
     "allowedKeys": ["1234567890abcdef", "abcdef1234567890"]
