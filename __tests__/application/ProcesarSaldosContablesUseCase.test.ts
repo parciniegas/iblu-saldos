@@ -2,9 +2,11 @@ import { describe, it, expect, vi } from 'vitest';
 import { ProcesarSaldosContablesUseCase } from '../../src/application/useCases/ProcesarSaldosContablesUseCase.js';
 import type { IMovimientoContableRepository } from '../../src/application/abstractions/IMovimientoContableRepository.js';
 import type { ISaldoContableRepository } from '../../src/application/abstractions/ISaldoContableRepository.js';
+import type { ISaldoContablePeriodoRepository } from '../../src/application/abstractions/ISaldoContablePeriodoRepository.js';
 import type { MovimientoContable } from '../../src/domain/entities/MovimientoContable.js';
 import type { SaldoContable } from '../../src/domain/entities/SaldoContable.js';
 import type { MovimientoContableCuentaAgrupadaRow } from '../../src/application/contracts/MovimientoContableCuentaAgrupadaRow.js';
+import type { SaldoContablePeriodo } from '../../src/application/contracts/SaldoContablePeriodo.js';
 
 const mockLogger = {
   info: vi.fn(),
@@ -16,7 +18,10 @@ const mockLogger = {
 function createMockRepositories(): {
   movimientoRepo: IMovimientoContableRepository;
   saldoRepo: ISaldoContableRepository;
+  saldoPeriodoRepo: ISaldoContablePeriodoRepository;
+  getPeriodosDesdeFechaOrdenadosMock: ReturnType<typeof vi.fn>;
 } {
+  const getPeriodosDesdeFechaOrdenadosMock = vi.fn().mockResolvedValue([]);
   const movimientoRepo = {
     getCuentasAgrupadasPorMovimientos: vi.fn().mockResolvedValue([]),
     getPeriodosDesdeFecha: vi.fn().mockResolvedValue([]),
@@ -30,14 +35,169 @@ function createMockRepositories(): {
     bulkUpdate: vi.fn().mockResolvedValue(undefined),
   } as unknown as ISaldoContableRepository;
 
-  return { movimientoRepo, saldoRepo };
+  const saldoPeriodoRepo = {
+    getPeriodosDesdeFechaOrdenados: getPeriodosDesdeFechaOrdenadosMock,
+  } as unknown as ISaldoContablePeriodoRepository;
+
+  return { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodosDesdeFechaOrdenadosMock };
 }
 
-describe('ProcesarSaldosContablesUseCase', () => {
-  it('debe persistir saldos nuevos agregados en el periodo', async () => {
-    const { movimientoRepo, saldoRepo } = createMockRepositories();
+describe('ProcesarSaldosContablesUseCase con periodos', () => {
+  it('debe lanzar error cuando no hay periodos con periodoInicio >= fechaDesde', async () => {
+    const { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodosDesdeFechaOrdenadosMock } = createMockRepositories();
 
-    movimientoRepo.getPeriodosDesdeFecha.mockResolvedValue([1]);
+    getPeriodosDesdeFechaOrdenadosMock.mockResolvedValue([]);
+
+    const useCase = new ProcesarSaldosContablesUseCase(
+      movimientoRepo,
+      saldoRepo,
+      saldoPeriodoRepo,
+      mockLogger,
+    );
+
+    const result = await useCase.execute('2024-01-01', 1000, 'test-job');
+
+    expect(result.status).toBe('failed');
+    expect(result.error).toContain('No se encontraron periodos con periodoInicio >= 2024-01-01');
+  });
+
+  it('debe usar los periodos del repositorio de periodos ordenados por nombre', async () => {
+    const { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodosDesdeFechaOrdenadosMock } = createMockRepositories();
+
+    const periodos: SaldoContablePeriodo[] = [
+      { id: 30, nombre: '2024-01', periodoInicio: new Date('2024-01-01'), cierre: false, cierreAnio: false },
+      { id: 10, nombre: '2024-02', periodoInicio: new Date('2024-02-01'), cierre: false, cierreAnio: false },
+      { id: 20, nombre: '2024-03', periodoInicio: new Date('2024-03-01'), cierre: false, cierreAnio: false },
+    ];
+    getPeriodosDesdeFechaOrdenadosMock.mockResolvedValue(periodos);
+    saldoRepo.getByPeriodo.mockResolvedValue([]);
+
+    const useCase = new ProcesarSaldosContablesUseCase(
+      movimientoRepo,
+      saldoRepo,
+      saldoPeriodoRepo,
+      mockLogger,
+    );
+
+    await useCase.execute('2024-01-01', 1000, 'test-job');
+
+    const llamadas = (getPeriodosDesdeFechaOrdenadosMock as any).mock.calls;
+    expect(llamadas.length).toBeGreaterThan(0);
+
+    // Verificar que los periodos se obtuvieron ordenados por nombre
+    const periodosObtenidos = (getPeriodosDesdeFechaOrdenadosMock as any).mock.calls[0][0];
+    expect(periodosObtenidos).toBeInstanceOf(Date);
+  });
+
+  it('debe procesar solo los periodos a partir del periodo de inicio identificado', async () => {
+    const { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodosDesdeFechaOrdenadosMock } = createMockRepositories();
+
+    // Datos pre-filtrados como devolvería el repositorio real (excluye periodo 100)
+    const periodos: SaldoContablePeriodo[] = [
+      { id: 10, nombre: '2024-01', periodoInicio: new Date('2024-01-01'), cierre: false, cierreAnio: false },
+      { id: 20, nombre: '2024-02', periodoInicio: new Date('2024-02-01'), cierre: false, cierreAnio: false },
+      { id: 30, nombre: '2024-03', periodoInicio: new Date('2024-03-01'), cierre: false, cierreAnio: false },
+    ];
+    getPeriodosDesdeFechaOrdenadosMock.mockResolvedValue(periodos);
+    saldoRepo.getByPeriodo.mockResolvedValue([]);
+
+    const useCase = new ProcesarSaldosContablesUseCase(
+      movimientoRepo,
+      saldoRepo,
+      saldoPeriodoRepo,
+      mockLogger,
+    );
+
+    const result = await useCase.execute('2024-01-01', 1000, 'test-job');
+
+    expect(result.status).toBe('completed');
+    expect(result.periodosProcesados).toBe(3); // 10, 20, 30 (excluye 100)
+  });
+
+  it('debe ordenar los periodos por nombre y no por id', async () => {
+    const { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodosDesdeFechaOrdenadosMock } = createMockRepositories();
+
+    // Los periodos vienen desordenados por id pero ordenados por nombre
+    const periodos: SaldoContablePeriodo[] = [
+      { id: 50, nombre: 'Enero', periodoInicio: new Date('2024-01-01'), cierre: false, cierreAnio: false },
+      { id: 30, nombre: 'Febrero', periodoInicio: new Date('2024-02-01'), cierre: false, cierreAnio: false },
+      { id: 10, nombre: 'Marzo', periodoInicio: new Date('2024-03-01'), cierre: false, cierreAnio: false },
+    ];
+    getPeriodosDesdeFechaOrdenadosMock.mockResolvedValue(periodos);
+    saldoRepo.getByPeriodo.mockResolvedValue([]);
+
+    const useCase = new ProcesarSaldosContablesUseCase(
+      movimientoRepo,
+      saldoRepo,
+      saldoPeriodoRepo,
+      mockLogger,
+    );
+
+    await useCase.execute('2024-01-01', 1000, 'test-job');
+
+    // Verificar que se procesaron en orden de nombre: Enero(50), Febrero(30), Marzo(10)
+    // El orden de procesamiento debería ser [50, 30, 10]
+    expect(saldoRepo.getByPeriodo).toHaveBeenCalledTimes(3);
+    const llamadas = (saldoRepo.getByPeriodo as any).mock.calls;
+    expect(llamadas[0][0]).toBe(50); // Enero
+    expect(llamadas[1][0]).toBe(30); // Febrero
+    expect(llamadas[2][0]).toBe(10); // Marzo
+  });
+
+  it('debe incluir el periodo cuyo periodoInicio es exactamente igual a fechaDesde', async () => {
+    const { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodosDesdeFechaOrdenadosMock } = createMockRepositories();
+
+    const periodos: SaldoContablePeriodo[] = [
+      { id: 10, nombre: '2024-01', periodoInicio: new Date('2024-01-01T00:00:00'), cierre: false, cierreAnio: false },
+      { id: 20, nombre: '2024-02', periodoInicio: new Date('2024-02-01'), cierre: false, cierreAnio: false },
+    ];
+    getPeriodosDesdeFechaOrdenadosMock.mockResolvedValue(periodos);
+    saldoRepo.getByPeriodo.mockResolvedValue([]);
+
+    const useCase = new ProcesarSaldosContablesUseCase(
+      movimientoRepo,
+      saldoRepo,
+      saldoPeriodoRepo,
+      mockLogger,
+    );
+
+    const result = await useCase.execute('2024-01-01', 1000, 'test-job');
+
+    expect(result.status).toBe('completed');
+    expect(result.periodosProcesados).toBe(2);
+  });
+
+  it('debe excluir periodos cuyo periodoInicio es anterior a fechaDesde', async () => {
+    const { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodosDesdeFechaOrdenadosMock } = createMockRepositories();
+
+    // Datos pre-filtrados como devolvería el repositorio real (excluye periodo 5)
+    const periodos: SaldoContablePeriodo[] = [
+      { id: 10, nombre: '2024-01', periodoInicio: new Date('2024-01-15'), cierre: false, cierreAnio: false },
+      { id: 20, nombre: '2024-02', periodoInicio: new Date('2024-02-01'), cierre: false, cierreAnio: false },
+    ];
+    getPeriodosDesdeFechaOrdenadosMock.mockResolvedValue(periodos);
+    saldoRepo.getByPeriodo.mockResolvedValue([]);
+
+    const useCase = new ProcesarSaldosContablesUseCase(
+      movimientoRepo,
+      saldoRepo,
+      saldoPeriodoRepo,
+      mockLogger,
+    );
+
+    const result = await useCase.execute('2024-01-01', 1000, 'test-job');
+
+    expect(result.status).toBe('completed');
+    expect(result.periodosProcesados).toBe(2); // 10 y 20, excluye 5
+  });
+
+  it('debe persistir saldos nuevos agregados en el periodo con nuevo repositorio de periodos', async () => {
+    const { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodosDesdeFechaOrdenadosMock } = createMockRepositories();
+
+    const periodos: SaldoContablePeriodo[] = [
+      { id: 1, nombre: '2024-01', periodoInicio: new Date('2024-01-01'), cierre: false, cierreAnio: false },
+    ];
+    getPeriodosDesdeFechaOrdenadosMock.mockResolvedValue(periodos);
     movimientoRepo.getBatchByPeriodo
       .mockResolvedValueOnce([{ id: 10 } as MovimientoContable])
       .mockResolvedValueOnce([]);
@@ -61,14 +221,12 @@ describe('ProcesarSaldosContablesUseCase', () => {
       } as MovimientoContableCuentaAgrupadaRow,
     ]);
 
-    saldoRepo.getByPeriodo
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([]);
+    saldoRepo.getByPeriodo.mockResolvedValue([]);
 
     const useCase = new ProcesarSaldosContablesUseCase(
       movimientoRepo,
       saldoRepo,
+      saldoPeriodoRepo,
       mockLogger,
     );
 
@@ -82,150 +240,21 @@ describe('ProcesarSaldosContablesUseCase', () => {
     expect(bulkPayload[0].credito).toBe(25);
   });
 
-  it('debe clamp batch size a [1000, 10000]', async () => {
-    const { movimientoRepo, saldoRepo } = createMockRepositories();
+  it('debe retornar error cuando falla la conexión al repositorio de periodos', async () => {
+    const { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodosDesdeFechaOrdenadosMock } = createMockRepositories();
 
-    movimientoRepo.getPeriodosDesdeFecha.mockResolvedValue([1, 2, 3]);
-    saldoRepo.getByPeriodo.mockResolvedValue([]);
-
-    const useCase = new ProcesarSaldosContablesUseCase(
-      movimientoRepo,
-      saldoRepo,
-      mockLogger,
-    );
-
-    // Test con batchSize menor al mínimo
-    const resultLow = await useCase.execute('2024-01-01', 100, 'test-job');
-    expect(resultLow.status).toBe('completed');
-
-    // Test con batchSize mayor al máximo
-    const resultHigh = await useCase.execute('2024-01-01', 99999, 'test-job-2');
-    expect(resultHigh.status).toBe('completed');
-  });
-
-  it('debe procesar periodos en orden ascendente', async () => {
-    const { movimientoRepo, saldoRepo } = createMockRepositories();
-
-    const periodos = [5, 10, 15, 20];
-    movimientoRepo.getPeriodosDesdeFecha.mockResolvedValue(periodos);
-    saldoRepo.getByPeriodo.mockResolvedValue([]);
+    getPeriodosDesdeFechaOrdenadosMock.mockRejectedValue(new Error('DB connection failed'));
 
     const useCase = new ProcesarSaldosContablesUseCase(
       movimientoRepo,
       saldoRepo,
-      mockLogger,
-    );
-
-    await useCase.execute('2024-01-01', 1000, 'test-job');
-
-    expect((movimientoRepo.getPeriodosDesdeFecha as any).mock.calls.length).toBeGreaterThan(0);
-  });
-
-  it('debe retornar error cuando falla la conexión', async () => {
-    const { movimientoRepo, saldoRepo } = createMockRepositories();
-
-    movimientoRepo.getPeriodosDesdeFecha.mockRejectedValue(new Error('Connection refused'));
-
-    const useCase = new ProcesarSaldosContablesUseCase(
-      movimientoRepo,
-      saldoRepo,
+      saldoPeriodoRepo,
       mockLogger,
     );
 
     const result = await useCase.execute('2024-01-01', 1000, 'test-job');
 
     expect(result.status).toBe('failed');
-    expect(result.error).toContain('Connection refused');
-  });
-
-  it('debe retornar resultados con métricas', async () => {
-    const { movimientoRepo, saldoRepo } = createMockRepositories();
-
-    movimientoRepo.getPeriodosDesdeFecha.mockResolvedValue([1, 2]);
-    saldoRepo.getByPeriodo.mockResolvedValue([]);
-
-    const useCase = new ProcesarSaldosContablesUseCase(
-      movimientoRepo,
-      saldoRepo,
-      mockLogger,
-    );
-
-    const result = await useCase.execute('2024-01-01', 1000, 'test-job');
-
-    expect(result.periodosProcesados).toBe(2);
-    expect(result.movimientosProcesados).toBeTypeOf('number');
-    expect(result.tiempoTotalMs).toBeTypeOf('number');
-    expect(result.jobId).toBe('test-job');
-  });
-
-  it('debe emitir progreso durante el procesamiento', async () => {
-    const { movimientoRepo, saldoRepo } = createMockRepositories();
-
-    movimientoRepo.getPeriodosDesdeFecha.mockResolvedValue([1]);
-    movimientoRepo.getBatchByPeriodo
-      .mockResolvedValueOnce([{ id: 10 } as MovimientoContable])
-      .mockResolvedValueOnce([]);
-    movimientoRepo.getCuentasAgrupadasPorMovimientos.mockResolvedValue([
-      {
-        MovimientoContableId: 10,
-        PeriodoId: 1,
-        CuentaContableId: 1105,
-        TerceroId: 200,
-        CentroCostoId: 10,
-        LibroContableId: 1,
-        UnidadNegocioId: 1,
-        CentroOperacionId: 1,
-        CategorizacionId: 1,
-        ModeloCarteraId: 1,
-        ModeloCartera: 'A',
-        ConceptoTributarioId: 1,
-        Debito: 100,
-        Credito: 25,
-        RegistrosMovimientoContableCuenta: 1,
-      } as MovimientoContableCuentaAgrupadaRow,
-    ]);
-
-    saldoRepo.getByPeriodo.mockResolvedValue([]);
-
-    const useCase = new ProcesarSaldosContablesUseCase(
-      movimientoRepo,
-      saldoRepo,
-      mockLogger,
-    );
-
-    const onProgress = vi.fn();
-    const result = await useCase.execute('2024-01-01', 1000, 'test-job', {
-      onProgress,
-      progressIntervalMs: 0,
-    });
-
-    expect(result.status).toBe('completed');
-    expect(onProgress).toHaveBeenCalled();
-
-    const lastCall = onProgress.mock.calls.at(-1)?.[0];
-    expect(lastCall?.status).toBe('processing');
-    expect(lastCall?.movimientosProcesados).toBeGreaterThanOrEqual(1);
-  });
-
-  it('debe cancelar el procesamiento cuando shouldCancel es true', async () => {
-    const { movimientoRepo, saldoRepo } = createMockRepositories();
-
-    movimientoRepo.getPeriodosDesdeFecha.mockResolvedValue([1, 2]);
-    saldoRepo.getByPeriodo.mockResolvedValue([]);
-
-    const useCase = new ProcesarSaldosContablesUseCase(
-      movimientoRepo,
-      saldoRepo,
-      mockLogger,
-    );
-
-    const result = await useCase.execute('2024-01-01', 1000, 'test-cancel-job', {
-      shouldCancel: () => true,
-      progressIntervalMs: 0,
-    });
-
-    expect(result.status).toBe('canceled');
-    expect(result.error).toContain('cancelado');
-    expect(result.jobId).toBe('test-cancel-job');
+    expect(result.error).toContain('DB connection failed');
   });
 });

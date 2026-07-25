@@ -176,10 +176,45 @@ export function registerSaldosRoutes(app: FastifyInstance): void {
         },
       },
       response: {
-        200: { type: 'object', additionalProperties: true },
-        400: { type: 'object', additionalProperties: true },
-        409: { type: 'object', additionalProperties: true },
-        503: { type: 'object', additionalProperties: true },
+        200: {
+          type: 'object',
+          properties: {
+            fechaDesde: { type: 'string' },
+            batchSize: { type: 'number' },
+            periodosCount: { type: 'number' },
+            periodos: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'number' },
+                  nombre: { type: 'string' },
+                },
+              },
+            },
+            mensaje: { type: 'string' },
+          },
+        },
+        400: {
+          type: 'object',
+          properties: {
+            error: { type: 'string' },
+            details: { type: 'array', items: { type: 'object' } },
+          },
+        },
+        500: {
+          type: 'object',
+          properties: {
+            error: { type: 'string' },
+            detail: { type: 'string' },
+          },
+        },
+        503: {
+          type: 'object',
+          properties: {
+            error: { type: 'string' },
+          },
+        },
       },
     },
   }, async (request, reply) => {
@@ -197,14 +232,21 @@ export function registerSaldosRoutes(app: FastifyInstance): void {
       const config = app.config;
       const effectiveBatchSize = Math.min(MAX_BATCH_SIZE, Math.max(MIN_BATCH_SIZE, batchSize ?? config?.procesamientoMovimientos?.batchSizeDefault ?? 1000));
 
-      const movimientoRepo = app.movimientoRepo;
+      const saldoPeriodoRepo = app.saldoPeriodoRepo;
 
-      if (!movimientoRepo) {
+      if (!saldoPeriodoRepo) {
         return reply.status(503).send({ error: 'Base de datos no disponible' });
       }
 
       const fechaDesdeDate = new Date(fechaDesde + 'T00:00:00');
-      const periodos = await movimientoRepo.getPeriodosDesdeFecha(fechaDesdeDate);
+      const periodosObjetos = await saldoPeriodoRepo.getPeriodosDesdeFechaOrdenados(fechaDesdeDate);
+
+      if (periodosObjetos.length === 0) {
+        return reply.status(400).send({ error: 'No se encontraron periodos con periodoInicio >= ' + fechaDesde });
+      }
+
+      const periodosOrdenados = [...periodosObjetos].sort((a, b) => a.nombre.localeCompare(b.nombre));
+      const periodos = periodosOrdenados.map((p) => ({ id: p.id, nombre: p.nombre }));
 
       return {
         fechaDesde,

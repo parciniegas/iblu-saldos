@@ -252,4 +252,65 @@ describe('API routes', () => {
 
     await app.close();
   });
+
+  it('debe retornar periodos ordenados con nombre en /preview', async () => {
+    const app = Fastify();
+    const config = loadConfig();
+    const apiKey = config.apiKeys.allowedKeys[0] ?? 'test-api-key';
+
+    app.decorate('config', config);
+    app.decorate('saldoPeriodoRepo', {
+      getPeriodosDesdeFechaOrdenados: vi.fn().mockResolvedValue([
+        { id: 30, nombre: '2024-03', periodoInicio: new Date('2024-03-01'), cierre: false, cierreAnio: false },
+        { id: 10, nombre: '2024-01', periodoInicio: new Date('2024-01-01'), cierre: false, cierreAnio: false },
+        { id: 20, nombre: '2024-02', periodoInicio: new Date('2024-02-01'), cierre: false, cierreAnio: false },
+      ]),
+    } as any);
+
+    registerSaldosRoutes(app);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/saldos/preview',
+      headers: { 'x-api-key': apiKey },
+      payload: { fechaDesde: '2024-01-01' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.periodosCount).toBe(3);
+    expect(body.periodos).toEqual([
+      { id: 10, nombre: '2024-01' },
+      { id: 20, nombre: '2024-02' },
+      { id: 30, nombre: '2024-03' },
+    ]);
+
+    await app.close();
+  });
+
+  it('debe retornar 400 cuando no hay periodos en /preview', async () => {
+    const app = Fastify();
+    const config = loadConfig();
+    const apiKey = config.apiKeys.allowedKeys[0] ?? 'test-api-key';
+
+    app.decorate('config', config);
+    app.decorate('saldoPeriodoRepo', {
+      getPeriodosDesdeFechaOrdenados: vi.fn().mockResolvedValue([]),
+    } as any);
+
+    registerSaldosRoutes(app);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/saldos/preview',
+      headers: { 'x-api-key': apiKey },
+      payload: { fechaDesde: '2024-01-01' },
+    });
+
+    expect(response.statusCode).toBe(400);
+    const body = response.json();
+    expect(body.error).toContain('No se encontraron periodos');
+
+    await app.close();
+  });
 });

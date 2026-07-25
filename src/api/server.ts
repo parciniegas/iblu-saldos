@@ -84,7 +84,7 @@ async function start(): Promise<FastifyInstance> {
   const movimientoRepo = new MovimientoContableRepository();
   const saldoRepo = new SaldoContableRepository();
   const saldoPeriodoRepo = new SaldoContablePeriodoRepository();
-  const useCase = new ProcesarSaldosContablesUseCase(movimientoRepo, saldoRepo, prismaLogger);
+  const useCase = new ProcesarSaldosContablesUseCase(movimientoRepo, saldoRepo, saldoPeriodoRepo, prismaLogger);
 
   app.decorate('movimientoRepo', movimientoRepo);
   app.decorate('saldoRepo', saldoRepo);

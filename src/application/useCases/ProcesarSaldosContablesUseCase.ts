@@ -1,5 +1,6 @@
 import type { IMovimientoContableRepository } from '../abstractions/IMovimientoContableRepository.js';
 import type { ISaldoContableRepository } from '../abstractions/ISaldoContableRepository.js';
+import type { ISaldoContablePeriodoRepository } from '../abstractions/ISaldoContablePeriodoRepository.js';
 import type { SaldoContableKey } from '../contracts/SaldoContableKey.js';
 import type { SaldoContable } from '../../domain/entities/SaldoContable.js';
 import type { MovimientoContableCuentaAgrupadaRow } from '../contracts/MovimientoContableCuentaAgrupadaRow.js';
@@ -69,6 +70,7 @@ export class ProcesarSaldosContablesUseCase {
   constructor(
     private readonly movimientoRepo: IMovimientoContableRepository,
     private readonly saldoRepo: ISaldoContableRepository,
+    private readonly saldoPeriodoRepo: ISaldoContablePeriodoRepository,
     private readonly logger: pino.Logger,
   ) {}
 
@@ -127,7 +129,11 @@ export class ProcesarSaldosContablesUseCase {
 
     try {
       ensureNotCanceled();
-      const periodos = await this.movimientoRepo.getPeriodosDesdeFecha(fechaDesdeDate);
+      const periodosObjetos = await this.saldoPeriodoRepo.getPeriodosDesdeFechaOrdenados(fechaDesdeDate);
+      if (periodosObjetos.length === 0) {
+        throw new Error(`No se encontraron periodos con periodoInicio >= ${fechaDesde}`);
+      }
+      const periodos = periodosObjetos.map((p) => p.id);
       this.logger.info({ jobId, periodosCount: periodos.length }, '[SALDOS] Periodos encontrados');
       const priorPeriodById = this.buildPriorPeriodMap(periodos);
       emitProgress(true);

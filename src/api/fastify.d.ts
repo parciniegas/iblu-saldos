@@ -2,12 +2,14 @@ import type { PrismaClient } from '@prisma/client';
 import type { AppConfig } from './config.js';
 import type { IMovimientoContableRepository } from '../application/abstractions/IMovimientoContableRepository.js';
 import type { ISaldoContableRepository } from '../application/abstractions/ISaldoContableRepository.js';
+import type { ISaldoContablePeriodoRepository } from '../application/abstractions/ISaldoContablePeriodoRepository.js';
 import type { ProcesarSaldosContablesUseCase } from '../application/useCases/ProcesarSaldosContablesUseCase.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
     movimientoRepo: IMovimientoContableRepository;
     saldoRepo: ISaldoContableRepository;
+    saldoPeriodoRepo: ISaldoContablePeriodoRepository;
     useCase: ProcesarSaldosContablesUseCase;
     config: AppConfig;
     prismaClient: PrismaClient;

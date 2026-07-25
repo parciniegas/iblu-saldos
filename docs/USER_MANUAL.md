@@ -17,6 +17,8 @@ API de procesamiento contable para el cálculo de saldos en sistemas de cuentas.
 9. [Variables de Entorno](#9-variables-de-entorno)
 10. [Ejemplos de Consumo](#10-ejemplos-de-consumo)
 11. [Swagger UI](#11-swagger-ui)
+12. [Tabla `saldos_contables_periodos`](#12-tabla-saldos_contables_periodos)
+13. [Referencias Rápidas](#13-referencias-rapidas)
 
 ---
 
@@ -228,7 +230,13 @@ X-API-Key: 1234567890abcdef
   "fechaDesde": "2024-01-01",
   "batchSize": 5000,
   "periodosCount": 5,
-  "periodos": [1, 2, 3, 4, 5],
+  "periodos": [
+    { "id": 10, "nombre": "2024-01" },
+    { "id": 20, "nombre": "2024-02" },
+    { "id": 30, "nombre": "2024-03" },
+    { "id": 40, "nombre": "2024-04" },
+    { "id": 50, "nombre": "2024-05" }
+  ],
   "mensaje": "Se procesarían 5 períodos con batch size 5000"
 }
 ```
@@ -236,7 +244,7 @@ X-API-Key: 1234567890abcdef
 | Campo | Descripción |
 |-------|-------------|
 | `periodosCount` | Cantidad de períodos que se procesarían |
-| `periodos` | Array de IDs de período en orden ascendente |
+| `periodos` | Array de objetos `{ id, nombre }` ordenados por `nombre` (el mismo orden en que se procesarán) |
 | `mensaje` | Mensaje descriptivo del preview |
 
 **Códigos de error:**
@@ -244,6 +252,7 @@ X-API-Key: 1234567890abcdef
 | Código | Condición | Respuesta |
 |--------|-----------|-----------|
 | `400` | Validación fallida | `{ "error": "Validación fallida", "details": [...] }` |
+| `400` | No hay periodos que cumplan la condición | `{ "error": "No se encontraron periodos con periodoInicio >= {fecha}" }` |
 | `401` | API key ausente o inválida | Ver sección 3.2 |
 | `500` | Error interno | `{ "error": "Error interno", "detail": "<mensaje>" }` |
 | `503` | Base de datos no disponible | `{ "error": "Base de datos no disponible" }` |
@@ -538,18 +547,31 @@ Ambos servicios realizan limpieza automática de jobs con más de 24 horas de an
 4. Generar UUID para jobId
 5. Crear job con status "pending"
 6. Iniciar procesamiento en segundo plano:
-   a. Llamar a ProcesarSaldosContablesUseCase.execute()
-   b. Actualizar estado/progress periódicamente (cada ~2 segundos)
-   c. Verificar si el job fue cancelado
+   a. Consultar la tabla saldos_contables_periodos:
+      - Filtrar periodos cuyo periodoInicio >= fechaDesde
+      - Ordenar por nombre ASC (campo único)
+      - Identificar el primer periodo que cumple la condición
+      - Si no se encuentra ninguno, lanzar error "No se encontraron periodos con periodoInicio >= {fecha}"
+   b. Llamar a ProcesarSaldosContablesUseCase.execute() con la lista ordenada de periodos
+   c. Actualizar estado/progress periódicamente (cada ~2 segundos)
+   d. Verificar si el job fue cancelado
 7. Actualizar job final con status: "completed", "failed" o "canceled"
 ```
 
 ### 7.2 Algoritmo de cálculo de saldos
 
-Para cada período (en orden ascendente):
+Determinación de periodos a procesar:
+
+1. **Buscar periodo de inicio**: Se consulta la tabla `saldos_contables_periodos`, se filtran los periodos cuyo `periodoInicio >= fechaDesde` y se ordenan por `nombre` (campo único) de forma ascendente.
+2. **Identificar primer periodo válido**: Se toma el primer periodo del resultado ordenado cuyo `periodoInicio` sea mayor o igual a `fechaDesde`.
+3. **Procesar todos los periodos siguientes**: A partir del periodo identificado, se procesan **todos** los periodos restantes de la tabla (ya ordenados por nombre), independientemente de si tienen movimientos contables o no.
+
+Orden de procesamiento: **por `nombre` del periodo** (no por `id`).
+
+Para cada período (en orden):
 
 1. **Cero-inicializar** todos los saldos del período (todos los campos a 0).
-2. **Obtener saldos del período anterior** (si no es el primer período):
+2. **Obtener saldos del período anterior** (si no es el primer período procesado):
    - `SaldoInicialDebito = saldoFinalDebito del período anterior`
    - `SaldoInicialCredito = saldoFinalCredito del período anterior`
 3. **Procesar movimientos en lotes** (batchSize, entre 1000 y 10000):
@@ -713,7 +735,51 @@ La documentación OpenAPI se genera automáticamente con `@fastify/swagger` y se
 
 ---
 
-## 11. Referencias Rápidas
+## 12. Tabla `saldos_contables_periodos`
+
+### 12.1 Descripción
+
+La tabla `saldos_contables_periodos` almacena los periodos contables que definen el orden y rango de fechas para el procesamiento de saldos. Es consultada al inicio de cada procesamiento para determinar qué periodos procesar.
+
+### 12.2 Campos
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `id` | BigInt (autoincrement) | Identificador único del periodo |
+| `nombre` | VARCHAR(255) | Nombre único del periodo (ej: "2024-01", "Enero"). Se usa para ordenar |
+| `periodoinicio` | DATE | Fecha de inicio del periodo. Se usa para filtrar desde `fechaDesde` |
+| `periodofin` | DATE | Fecha de fin del periodo |
+| `cierre` | Boolean | Indica si el periodo está cerrado (default: true) |
+| `cierreanio` | Boolean | Indica cierre de año (default: false) |
+| `cierrecontable` | Boolean | Indica cierre contable (default: false) |
+| `recalculologico` | Boolean | Indica si se debe recalcular con lógica especial |
+| `created_at` | TIMESTAMP | Fecha de creación |
+| `updated_at` | TIMESTAMP | Fecha de última actualización |
+| `usuariocreacion_id` | BigInt | ID del usuario que creó el registro |
+| `usuariomodificacion_id` | BigInt | ID del usuario que modificó el registro |
+
+### 12.3 Relación con el procesamiento
+
+Al ejecutar `POST /api/v1/saldos/procesar` con `fechaDesde`:
+
+1. Se consulta `saldos_contables_periodos` ordenando por `nombre ASC`.
+2. Se identifica el primer periodo cuyo `periodoinicio >= fechaDesde`.
+3. Se procesan todos los periodos desde ese punto en adelante, **ordenados por `nombre`**.
+4. Si no se encuentra ningún periodo con `periodoinicio >= fechaDesde`, se retorna un error `500` con el mensaje: `"No se encontraron periodos con periodoInicio >= {fecha}"`.
+
+### 12.4 Ejemplo de datos
+
+| id | nombre | periodoinicio | periodofin | cierre |
+|----|--------|---------------|------------|--------|
+| 10 | 2024-01 | 2024-01-01 | 2024-01-31 | false |
+| 20 | 2024-02 | 2024-02-01 | 2024-02-29 | false |
+| 30 | 2024-03 | 2024-03-01 | 2024-03-31 | false |
+
+Si se procesa con `fechaDesde: "2024-01-15"`, solo se incluirían los periodos 20 y 30 (el 10 tiene `periodoinicio: 2024-01-01` que es anterior a `2024-01-15`).
+
+---
+
+## 13. Referencias Rápidas
 
 ### Resumen de endpoints
 
