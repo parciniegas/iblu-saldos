@@ -1,5 +1,3 @@
-// This is your Prisma schema file,
-// learn more about writing schemas in https://pris.ly/d/prisma-schema
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,71 +8,107 @@ datasource db {
 }
 
 model MovimientoContable {
-  id                     BigInt   @id @default(autoincrement()) @map("id") @db.UnsignedBigInt
-  consecutivo            Int      @default(0) @map("consecutivo")
-  estado                 String   @default("APROBADO") @map("estado") @db.VarChar(255)
-  fecha                  DateTime @map("fecha") @db.DateTime(0)
-  comprobanteId          BigInt?  @map("comprobante_id") @db.UnsignedBigInt
-  documento              String?  @map("documento") @db.VarChar(255)
-  usuarioCreacionId      BigInt?  @map("usuariocreacion_id") @db.UnsignedBigInt
-  usuarioModificacionId  BigInt?  @map("usuariomodificacion_id") @db.UnsignedBigInt
-  periodoId              BigInt?  @map("periodo_id") @db.UnsignedBigInt
-  libroContableId        BigInt?  @map("librocontable_id") @db.UnsignedBigInt
-  cerrado                Boolean  @default(false) @map("cerrado")
-  createdAt              DateTime? @map("created_at") @db.Timestamp(0)
-  updatedAt              DateTime? @map("updated_at") @db.Timestamp(0)
+  id                    BigInt                                 @id @default(autoincrement()) @map("id") @db.UnsignedBigInt
+  consecutivo           Int                                    @default(0) @map("consecutivo")
+  estado                String                                 @default("APROBADO") @map("estado") @db.VarChar(255)
+  fecha                 DateTime                               @map("fecha") @db.DateTime(0)
+  comprobanteId         BigInt?                                @map("comprobante_id") @db.UnsignedBigInt
+  observacion           String?                                @db.VarChar(255)
+  createdAt             DateTime?                              @map("created_at") @db.Timestamp(0)
+  updatedAt             DateTime?                              @map("updated_at") @db.Timestamp(0)
+  libroContableId       BigInt?                                @map("librocontable_id") @db.UnsignedBigInt
+  modelo_id             BigInt?
+  modelo                String?                                @db.VarChar(255)
+  documento             String?                                @map("documento") @db.VarChar(255)
+  usuarioCreacionId     BigInt?                                @map("usuariocreacion_id") @db.UnsignedBigInt
+  usuarioModificacionId BigInt?                                @map("usuariomodificacion_id") @db.UnsignedBigInt
+  periodoId             BigInt?                                @map("periodo_id") @db.UnsignedBigInt
+  cerrado               Boolean                                @default(false) @map("cerrado")
+  hashconsecutivo       BigInt?
+  consecutivoestado     movimiento_contable_consecutivoestado?
 
+  @@index([fecha, periodoId], map: "movimiento_contable_fecha_IDX")
+  @@index([periodoId, id], map: "movimiento_contable_periodo_id_IDX")
   @@map("movimiento_contable")
 }
 
 model MovimientoContableCuenta {
-  id                  BigInt   @id @default(autoincrement()) @map("id") @db.UnsignedBigInt
-  movimientoContableId BigInt  @map("movimientocontable_id") @db.UnsignedBigInt
-  cuentaContableId    BigInt   @map("cuentacontable_id") @db.UnsignedBigInt
-  terceroId           BigInt?  @map("tercero_id") @db.UnsignedBigInt
-  centroCostoId       BigInt?  @map("centrocosto_id") @db.UnsignedBigInt
-  libroContableId     BigInt?  @map("librocontable_id") @db.UnsignedBigInt
-  unidadNegocioId     BigInt?  @map("unidadnegocio_id") @db.UnsignedBigInt
-  centroOperacionId   BigInt?  @map("centrooperacion_id") @db.UnsignedBigInt
-  categorizacionId    BigInt?  @map("categorizacion_id") @db.UnsignedBigInt
-  modeloCartera       String?  @map("modelocartera") @db.VarChar(255)
-  modeloCarteraId     BigInt?  @map("modelocartera_id")
-  conceptoTributarioId BigInt? @map("conceptotributario_id") @db.UnsignedBigInt
-  base                Decimal  @default(0.00) @map("base") @db.Decimal(18, 2)
-  debito              Decimal  @default(0.00) @map("debito") @db.Decimal(18, 2)
-  credito             Decimal  @default(0.00) @map("credito") @db.Decimal(18, 2)
-  trm                 Decimal  @default(0.000000) @map("trm") @db.Decimal(18, 6)
-  factorConversion    Decimal  @default(0.000000) @map("factorconversion") @db.Decimal(18, 6)
-  createdAt           DateTime? @map("created_at") @db.Timestamp(0)
-  updatedAt           DateTime? @map("updated_at") @db.Timestamp(0)
+  id                   BigInt    @id @default(autoincrement()) @map("id") @db.UnsignedBigInt
+  movimientoContableId BigInt    @map("movimientocontable_id") @db.UnsignedBigInt
+  cuentaContableId     BigInt    @map("cuentacontable_id") @db.UnsignedBigInt
+  terceroId            BigInt?   @map("tercero_id") @db.UnsignedBigInt
+  centroCostoId        BigInt?   @map("centrocosto_id") @db.UnsignedBigInt
+  base                 Decimal   @default(0.00) @map("base") @db.Decimal(18, 2)
+  debito               Decimal   @default(0.00) @map("debito") @db.Decimal(18, 2)
+  credito              Decimal   @default(0.00) @map("credito") @db.Decimal(18, 2)
+  observacion          String?   @db.VarChar(255)
+  createdAt            DateTime? @map("created_at") @db.Timestamp(0)
+  updatedAt            DateTime? @map("updated_at") @db.Timestamp(0)
+  libroContableId      BigInt?   @map("librocontable_id") @db.UnsignedBigInt
+  unidadNegocioId      BigInt?   @map("unidadnegocio_id") @db.UnsignedBigInt
+  trm                  Decimal   @default(0.000000) @map("trm") @db.Decimal(18, 6)
+  factorConversion     Decimal   @default(0.000000) @map("factorconversion") @db.Decimal(18, 6)
+  centroOperacionId    BigInt?   @map("centrooperacion_id") @db.UnsignedBigInt
+  categorizacionId     BigInt?   @map("categorizacion_id") @db.UnsignedBigInt
+  modeloCarteraId      BigInt?   @map("modelocartera_id")
+  modeloCartera        String?   @map("modelocartera") @db.VarChar(255)
+  conceptoTributarioId BigInt?   @map("conceptotributario_id") @db.UnsignedBigInt
 
+  @@index([movimientoContableId], map: "movimiento_contable_cuentas_movimientocontable_id_IDX")
   @@map("movimiento_contable_cuentas")
 }
 
 model SaldoContable {
-  id                  BigInt   @id @default(autoincrement()) @map("id") @db.UnsignedBigInt
-  periodoId           BigInt   @map("periodo_id") @db.UnsignedBigInt
-  class               String?  @map("class") @db.VarChar(255)
-  entidadId           BigInt?  @map("entidad_id")
-  terceroId           BigInt?  @map("tercero_id") @db.UnsignedBigInt
-  cuentaContableId    BigInt?  @map("cuentacontable_id") @db.UnsignedBigInt
-  centroCostoId       BigInt?  @map("centrocosto_id") @db.UnsignedBigInt
-  libroContableId     BigInt?  @map("librocontable_id") @db.UnsignedBigInt
-  unidadNegocioId     BigInt?  @map("unidadnegocio_id") @db.UnsignedBigInt
-  centroOperacionId   BigInt?  @map("centrooperacion_id") @db.UnsignedBigInt
-  categorizacionId    BigInt?  @map("categorizacion_id") @db.UnsignedBigInt
-  modeloCartera       String?  @map("modelocartera") @db.VarChar(255)
-  modeloCarteraId     BigInt?  @map("modelocartera_id")
-  conceptoTributarioId BigInt? @map("conceptotributario_id") @db.UnsignedBigInt
-  saldoInicialDebito  Decimal  @default(0.00) @map("saldoinicialdebito") @db.Decimal(18, 2)
-  saldoInicialCredito Decimal  @default(0.00) @map("saldoinicialcredito") @db.Decimal(18, 2)
-  debito              Decimal  @default(0.00) @map("debito") @db.Decimal(18, 2)
-  credito             Decimal  @default(0.00) @map("credito") @db.Decimal(18, 2)
-  saldoFinalDebito    Decimal  @default(0.00) @map("saldofinaldebito") @db.Decimal(18, 2)
-  saldoFinalCredito   Decimal  @default(0.00) @map("saldofinalcredito") @db.Decimal(18, 2)
-  cierre              Boolean  @default(false) @map("cierre")
-  createdAt           DateTime? @map("created_at") @db.Timestamp(0)
-  updatedAt           DateTime? @map("updated_at") @db.Timestamp(0)
+  id                   BigInt    @id @default(autoincrement()) @map("id") @db.UnsignedBigInt
+  periodoId            BigInt    @map("periodo_id") @db.UnsignedBigInt
+  class                String?   @map("class") @db.VarChar(255)
+  entidadId            BigInt?   @map("entidad_id")
+  terceroId            BigInt?   @map("tercero_id") @db.UnsignedBigInt
+  cuentaContableId     BigInt?   @map("cuentacontable_id") @db.UnsignedBigInt
+  centroCostoId        BigInt?   @map("centrocosto_id") @db.UnsignedBigInt
+  saldoInicialDebito   Decimal   @default(0.00) @map("saldoinicialdebito") @db.Decimal(18, 2)
+  saldoInicialCredito  Decimal   @default(0.00) @map("saldoinicialcredito") @db.Decimal(18, 2)
+  debito               Decimal   @default(0.00) @map("debito") @db.Decimal(18, 2)
+  credito              Decimal   @default(0.00) @map("credito") @db.Decimal(18, 2)
+  saldoFinalDebito     Decimal   @default(0.00) @map("saldofinaldebito") @db.Decimal(18, 2)
+  saldoFinalCredito    Decimal   @default(0.00) @map("saldofinalcredito") @db.Decimal(18, 2)
+  createdAt            DateTime? @map("created_at") @db.Timestamp(0)
+  updatedAt            DateTime? @map("updated_at") @db.Timestamp(0)
+  libroContableId      BigInt?   @map("librocontable_id") @db.UnsignedBigInt
+  unidadNegocioId      BigInt?   @map("unidadnegocio_id") @db.UnsignedBigInt
+  centroOperacionId    BigInt?   @map("centrooperacion_id") @db.UnsignedBigInt
+  categorizacionId     BigInt?   @map("categorizacion_id") @db.UnsignedBigInt
+  cierre               Boolean   @default(false) @map("cierre")
+  modeloCarteraId      BigInt?   @map("modelocartera_id")
+  modeloCartera        String?   @map("modelocartera") @db.VarChar(255)
+  conceptoTributarioId BigInt?   @map("conceptotributario_id") @db.UnsignedBigInt
 
+  @@index([periodoId, terceroId, cuentaContableId, centroCostoId], map: "saldos_contables_periodo_id_IDX")
   @@map("saldos_contables")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model SaldoContablePeriodo {
+  id                    BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  nombre                String    @db.VarChar(255)
+  periodoInicio         DateTime? @map("periodoinicio") @db.Date
+  periodoFin            DateTime? @map("periodofin") @db.Date
+  cierre                Boolean   @default(true)
+  createdAt             DateTime? @map("created_at") @db.Timestamp(0)
+  updatedAt             DateTime? @map("updated_at") @db.Timestamp(0)
+  usuarioCreacionId     BigInt?   @map("usuariocreacion_id") @db.UnsignedBigInt
+  usuarioModificacionId BigInt?   @map("usuariomodificacion_id") @db.UnsignedBigInt
+  recalculoLogico       Boolean   @map("recalculologico")
+  cierreAnio            Boolean   @default(false) @map("cierreanio")
+  cierreContable        Boolean   @default(false) @map("cierrecontable")
+
+  @@index([nombre], map: "saldos_contables_periodos_nombre_index")
+  @@index([usuarioCreacionId], map: "saldos_contables_periodos_usuariocreacion_id_foreign")
+  @@index([usuarioModificacionId], map: "saldos_contables_periodos_usuariomodificacion_id_foreign")
+  @@map("saldos_contables_periodos")
+}
+
+enum movimiento_contable_consecutivoestado {
+  PENDIENTE
+  ASIGNADO
 }
