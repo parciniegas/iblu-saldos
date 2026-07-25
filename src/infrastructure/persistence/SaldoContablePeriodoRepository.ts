@@ -4,7 +4,7 @@ import { prisma } from './PrismaService.js';
 
 export class SaldoContablePeriodoRepository implements ISaldoContablePeriodoRepository {
   async getPeriodosDesdeFechaOrdenados(fechaDesde: Date): Promise<SaldoContablePeriodo[]> {
-    const fechaNormalizada = new Date(fechaDesde.getFullYear(), fechaDesde.getMonth(), 1);
+    const fechaNormalizada = new Date(Date.UTC(fechaDesde.getUTCFullYear(), fechaDesde.getUTCMonth(), 1));
     const rows = await prisma.saldoContablePeriodo.findMany({
       orderBy: { nombre: 'asc' },
       select: {

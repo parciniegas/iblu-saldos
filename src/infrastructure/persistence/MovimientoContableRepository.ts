@@ -53,7 +53,7 @@ export class MovimientoContableRepository implements IMovimientoContableReposito
   }
 
   async getPeriodosDesdeFecha(fechaDesde: Date): Promise<number[]> {
-    const fechaNormalizada = new Date(fechaDesde.getFullYear(), fechaDesde.getMonth(), 1);
+    const fechaNormalizada = new Date(Date.UTC(fechaDesde.getUTCFullYear(), fechaDesde.getUTCMonth(), 1));
     const rows = await prisma.movimientoContable.findMany({
       select: { periodoId: true },
       where: {
