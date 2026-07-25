@@ -7,6 +7,7 @@ import { loadConfig } from './config.js';
 import { connectPrisma, prisma, setPrismaLogger } from '../infrastructure/persistence/PrismaService.js';
 import { MovimientoContableRepository } from '../infrastructure/persistence/MovimientoContableRepository.js';
 import { SaldoContableRepository } from '../infrastructure/persistence/SaldoContableRepository.js';
+import { SaldoContablePeriodoRepository } from '../infrastructure/persistence/SaldoContablePeriodoRepository.js';
 import { ProcesarSaldosContablesUseCase } from '../application/useCases/ProcesarSaldosContablesUseCase.js';
 import { registerSaldosRoutes } from './routes/saldos.js';
 import { registerHealthRoutes } from './routes/health.js';
@@ -82,10 +83,12 @@ async function start(): Promise<FastifyInstance> {
 
   const movimientoRepo = new MovimientoContableRepository();
   const saldoRepo = new SaldoContableRepository();
+  const saldoPeriodoRepo = new SaldoContablePeriodoRepository();
   const useCase = new ProcesarSaldosContablesUseCase(movimientoRepo, saldoRepo, prismaLogger);
 
   app.decorate('movimientoRepo', movimientoRepo);
   app.decorate('saldoRepo', saldoRepo);
+  app.decorate('saldoPeriodoRepo', saldoPeriodoRepo);
   app.decorate('useCase', useCase);
   app.decorate('config', config);
   app.decorate('logger', prismaLogger);
