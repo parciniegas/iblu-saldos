@@ -15,6 +15,7 @@ import { registerHealthRoutes } from './routes/health.js';
 import { MessageProcessor } from './rabbitmq/MessageProcessor.js';
 import { RabbitMQConsumer } from './rabbitmq/RabbitMQConsumer.js';
 import { createJobService } from './services/createJobService.js';
+import { PeriodoScheduler } from './scheduler/PeriodoScheduler.js';
 
 const config = loadConfig();
 
@@ -108,6 +109,7 @@ async function start(): Promise<FastifyInstance> {
   const host = config.server.host;
 
   let rabbitmqConsumer: RabbitMQConsumer | null = null;
+  let periodoScheduler: PeriodoScheduler | null = null;
 
   if (config.rabbitmq) {
     const messageProcessor = new MessageProcessor(movimientoRepo, saldoRepo, saldoPeriodoRepo, prismaLogger);
@@ -123,8 +125,19 @@ async function start(): Promise<FastifyInstance> {
     }
   }
 
+  // Iniciar scheduler de creación de periodos
+  try {
+    const cronExpr = config.scheduler?.createPeriodoCron ?? '30 0 1 * *';
+    periodoScheduler = new PeriodoScheduler();
+    periodoScheduler.start(app, cronExpr);
+    prismaLogger.info({ cronExpr }, 'Scheduler de periodos iniciado');
+  } catch (error) {
+    prismaLogger.warn({ error: error instanceof Error ? error.message : String(error) }, 'No se pudo iniciar el scheduler de periodos');
+  }
+
   app.addHook('onClose', async () => {
     await rabbitmqConsumer?.stop();
+    periodoScheduler?.stop();
     await disconnectPrisma();
   });
 

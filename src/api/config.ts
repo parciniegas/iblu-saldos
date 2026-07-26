@@ -31,6 +31,9 @@ export type AppConfig = {
     retryAttempts: number;
     retryDelayMs: number;
   };
+  scheduler?: {
+    createPeriodoCron?: string; // cron expresión para crear periodo automáticamente
+  };
 };
 
 function getEnv(name: string, fallback: string): string {
@@ -71,6 +74,7 @@ function getDefaultConfig(): AppConfig {
       retryAttempts: 3,
       retryDelayMs: 5000,
     },
+    scheduler: { createPeriodoCron: '30 0 1 * *' },
   };
 }
 
@@ -95,6 +99,9 @@ function applyEnvOverrides(config: AppConfig): AppConfig {
     connectionString: { mariaDb: connectionString },
     server: { port, host },
     rabbitmq,
+    scheduler: {
+      createPeriodoCron: getEnv('SCHEDULER__CreatePeriodoCron', config.scheduler?.createPeriodoCron ?? '30 0 1 * *'),
+    },
   };
 }
 
