@@ -4,13 +4,17 @@ import fastifySwagger from '@fastify/swagger';
 import fastifySwaggerUi from '@fastify/swagger-ui';
 import pino from 'pino';
 import { loadConfig } from './config.js';
-import { connectPrisma, prisma, setPrismaLogger } from '../infrastructure/persistence/PrismaService.js';
+import { connectPrisma, prisma, setPrismaLogger, disconnectPrisma } from '../infrastructure/persistence/PrismaService.js';
 import { MovimientoContableRepository } from '../infrastructure/persistence/MovimientoContableRepository.js';
 import { SaldoContableRepository } from '../infrastructure/persistence/SaldoContableRepository.js';
 import { SaldoContablePeriodoRepository } from '../infrastructure/persistence/SaldoContablePeriodoRepository.js';
 import { ProcesarSaldosContablesUseCase } from '../application/useCases/ProcesarSaldosContablesUseCase.js';
 import { registerSaldosRoutes } from './routes/saldos.js';
+import { registerPeriodosRoutes } from './routes/periodos.js';
 import { registerHealthRoutes } from './routes/health.js';
+import { MessageProcessor } from './rabbitmq/MessageProcessor.js';
+import { RabbitMQConsumer } from './rabbitmq/RabbitMQConsumer.js';
+import { createJobService } from './services/createJobService.js';
 
 const config = loadConfig();
 
@@ -52,6 +56,7 @@ async function start(): Promise<FastifyInstance> {
       tags: [
         { name: 'Health', description: 'Estado operativo del servicio' },
         { name: 'Saldos', description: 'Procesamiento y administración de saldos contables' },
+        { name: 'Periodos', description: 'Administración de periodos contables' },
       ],
       components: {
         securitySchemes: {
@@ -62,7 +67,7 @@ async function start(): Promise<FastifyInstance> {
           },
         },
       },
-      servers: [{ url: 'http://localhost:3000', description: 'Local' }],
+      servers: [{ url: '/', description: 'Current origin' }],
       externalDocs: {
         url: 'https://github.com/your-org/saldos-node',
         description: 'Documentación',
@@ -93,18 +98,43 @@ async function start(): Promise<FastifyInstance> {
   app.decorate('config', config);
   app.decorate('logger', prismaLogger);
   app.decorate('prismaClient', prisma);
+  app.decorate('jobService', createJobService());
 
   registerSaldosRoutes(app);
+  registerPeriodosRoutes(app);
   registerHealthRoutes(app);
 
   const port = config.server.port;
   const host = config.server.host;
+
+  let rabbitmqConsumer: RabbitMQConsumer | null = null;
+
+  if (config.rabbitmq) {
+    const messageProcessor = new MessageProcessor(movimientoRepo, saldoRepo, saldoPeriodoRepo, prismaLogger);
+    rabbitmqConsumer = new RabbitMQConsumer(config.rabbitmq, messageProcessor, prismaLogger);
+
+    try {
+      await rabbitmqConsumer.start();
+    } catch (error) {
+      prismaLogger.warn(
+        { error: error instanceof Error ? error.message : String(error) },
+        'RabbitMQ no disponible, continuando sin consumidor',
+      );
+    }
+  }
+
+  app.addHook('onClose', async () => {
+    await rabbitmqConsumer?.stop();
+    await disconnectPrisma();
+  });
 
   try {
     await app.listen({ port, host });
     prismaLogger.info({ port, host }, 'API escuchando');
   } catch (error) {
     prismaLogger.error({ error: error instanceof Error ? error.message : String(error) }, 'Error iniciando API');
+    await rabbitmqConsumer?.stop();
+    await disconnectPrisma();
     throw error;
   }
 

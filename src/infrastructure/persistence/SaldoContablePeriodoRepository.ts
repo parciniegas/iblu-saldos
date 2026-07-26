@@ -30,4 +30,53 @@ export class SaldoContablePeriodoRepository implements ISaldoContablePeriodoRepo
       cierreAnio: r.cierreAnio,
     } satisfies SaldoContablePeriodo));
   }
+
+  async existsByNombre(nombre: string): Promise<boolean> {
+    const found = await prisma.saldoContablePeriodo.findFirst({ where: { nombre }, select: { id: true } });
+    return !!found;
+  }
+
+  async getByNombre(nombre: string): Promise<SaldoContablePeriodo | null> {
+    const row = await prisma.saldoContablePeriodo.findFirst({ where: { nombre } });
+    if (!row) return null;
+    return {
+      id: Number(row.id),
+      nombre: row.nombre,
+      periodoInicio: row.periodoInicio ?? undefined,
+      periodoFin: row.periodoFin ?? undefined,
+      cierre: row.cierre,
+      cierreAnio: row.cierreAnio,
+    } satisfies SaldoContablePeriodo;
+  }
+
+  async getUltimoPeriodo(): Promise<SaldoContablePeriodo | null> {
+    const row = await prisma.saldoContablePeriodo.findFirst({ orderBy: { nombre: 'desc' } });
+    if (!row) return null;
+    return {
+      id: Number(row.id),
+      nombre: row.nombre,
+      periodoInicio: row.periodoInicio ?? undefined,
+      periodoFin: row.periodoFin ?? undefined,
+      cierre: row.cierre,
+      cierreAnio: row.cierreAnio,
+    } satisfies SaldoContablePeriodo;
+  }
+
+  async create(nombre: string, periodoInicio: Date, periodoFin: Date): Promise<{ id: number }> {
+    const now = new Date();
+    const created = await prisma.saldoContablePeriodo.create({
+      data: {
+        nombre,
+        periodoInicio,
+        periodoFin,
+        cierre: false,
+        cierreAnio: false,
+        recalculoLogico: false,
+        createdAt: now,
+        updatedAt: now,
+      },
+      select: { id: true },
+    });
+    return { id: Number(created.id) };
+  }
 }

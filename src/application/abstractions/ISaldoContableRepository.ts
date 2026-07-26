@@ -7,4 +7,8 @@ export interface ISaldoContableRepository {
   updateByKey(key: SaldoContableKey, values: SaldoContableUpdateValues): Promise<void>;
   getByPeriodo(periodoId: number): Promise<SaldoContable[]>;
   bulkUpdate(saldos: SaldoContable[]): Promise<void>;
+  // Crea saldos para newPeriodoId copiando desde prevPeriodoId:
+  // saldoInicial = saldoFinal previo; debito/credito = 0; saldoFinal = saldoInicial; cierre = false
+  copyFromPeriodo(prevPeriodoId: number, newPeriodoId: number): Promise<number>;
+  countByPeriodo(periodoId: number): Promise<number>;
 }

@@ -17,11 +17,16 @@ const procesarSchema = z.object({
 
 export function registerSaldosRoutes(app: FastifyInstance): void {
   registerAuthPlugin(app);
-  const jobService = createJobService();
-  const cleanupTimer = setInterval(() => {
-    jobService.cleanup();
-  }, 60 * 60 * 1000);
-  cleanupTimer.unref?.();
+  let jobService = (app as any).jobService;
+  if (!jobService) {
+    jobService = createJobService();
+    (app as any).jobService = jobService;
+    const cleanupTimer = setInterval(() => {
+      jobService.cleanup();
+    }, 60 * 60 * 1000);
+    cleanupTimer.unref?.();
+    (app as any).jobServiceCleanupTimer = cleanupTimer;
+  }
 
   const MIN_BATCH_SIZE = 1000;
   const MAX_BATCH_SIZE = 10000;
@@ -119,7 +124,7 @@ export function registerSaldosRoutes(app: FastifyInstance): void {
     };
 
     for (const job of all) {
-      metrics[job.status] += 1;
+      (metrics as any)[job.status] += 1;
     }
 
     return metrics;

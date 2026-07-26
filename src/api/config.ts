@@ -24,6 +24,13 @@ export type AppConfig = {
     port: number;
     host: string;
   };
+  rabbitmq?: {
+    host: string;
+    queueName: string;
+    prefetch: number;
+    retryAttempts: number;
+    retryDelayMs: number;
+  };
 };
 
 function getEnv(name: string, fallback: string): string {
@@ -57,6 +64,13 @@ function getDefaultConfig(): AppConfig {
     procesamientoMovimientos: { fechaDesdeDefault: '2000-01-01', batchSizeDefault: 1000 },
     logging: { level: 'info', filePath: 'logs/saldos-api-.json', rollingInterval: 'day' },
     server: { port: 3000, host: '0.0.0.0' },
+    rabbitmq: {
+      host: 'amqp://localhost',
+      queueName: 'saldos_movimientos',
+      prefetch: 1,
+      retryAttempts: 3,
+      retryDelayMs: 5000,
+    },
   };
 }
 
@@ -65,10 +79,22 @@ function applyEnvOverrides(config: AppConfig): AppConfig {
   const port = getEnvInt('Server__Port', config.server.port);
   const host = getEnv('Server__Host', config.server.host);
 
+  const rabbitmq = config.rabbitmq
+    ? {
+        ...config.rabbitmq,
+        host: getEnv('RABBITMQ__Host', config.rabbitmq.host),
+        queueName: getEnv('RABBITMQ__QueueName', config.rabbitmq.queueName),
+        prefetch: getEnvInt('RABBITMQ__Prefetch', config.rabbitmq.prefetch),
+        retryAttempts: getEnvInt('RABBITMQ__RetryAttempts', config.rabbitmq.retryAttempts),
+        retryDelayMs: getEnvInt('RABBITMQ__RetryDelayMs', config.rabbitmq.retryDelayMs),
+      }
+    : undefined;
+
   return {
     ...config,
     connectionString: { mariaDb: connectionString },
     server: { port, host },
+    rabbitmq,
   };
 }
 

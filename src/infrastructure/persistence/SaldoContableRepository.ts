@@ -25,6 +25,103 @@ export class SaldoContableRepository implements ISaldoContableRepository {
     return this.toDomain(saldo);
   }
 
+  async copyFromPeriodo(prevPeriodoId: number, newPeriodoId: number): Promise<number> {
+    // Inserta saldos del periodo anterior con saldos iniciales = finales previos y debito/credito en 0
+    let affected = await prisma.$executeRaw`
+      INSERT INTO saldos_contables (
+        periodo_id,
+        class,
+        entidad_id,
+        tercero_id,
+        cuentacontable_id,
+        centrocosto_id,
+        saldoinicialdebito,
+        saldoinicialcredito,
+        debito,
+        credito,
+        saldofinaldebito,
+        saldofinalcredito,
+        created_at,
+        updated_at,
+        librocontable_id,
+        unidadnegocio_id,
+        centrooperacion_id,
+        categorizacion_id,
+        cierre,
+        modelocartera_id,
+        modelocartera,
+        conceptotributario_id
+      )
+      SELECT
+        ${newPeriodoId} as periodo_id,
+        class,
+        entidad_id,
+        tercero_id,
+        cuentacontable_id,
+        centrocosto_id,
+        saldofinaldebito as saldoinicialdebito,
+        saldofinalcredito as saldoinicialcredito,
+        0 as debito,
+        0 as credito,
+        saldofinaldebito,
+        saldofinalcredito,
+        NOW() as created_at,
+        NOW() as updated_at,
+        librocontable_id,
+        unidadnegocio_id,
+        centrooperacion_id,
+        categorizacion_id,
+        false as cierre,
+        modelocartera_id,
+        modelocartera,
+        conceptotributario_id
+      FROM saldos_contables
+      WHERE periodo_id = ${prevPeriodoId}
+    `;
+    // Fallback: si no insertó nada pero el periodo anterior tiene saldos, realizar copia programática
+    const inserted = Number(affected ?? 0);
+    if (inserted > 0) return inserted;
+
+    const prevCount = await prisma.saldoContable.count({ where: { periodoId: prevPeriodoId } });
+    if (prevCount === 0) return 0;
+
+    const prevRows = await prisma.saldoContable.findMany({ where: { periodoId: prevPeriodoId } });
+    if (prevRows.length === 0) return 0;
+
+    const mapped = prevRows.map((s): Prisma.SaldoContableCreateManyInput => ({
+      periodoId: newPeriodoId,
+      class: s.class,
+      entidadId: s.entidadId,
+      terceroId: s.terceroId,
+      cuentaContableId: s.cuentaContableId,
+      centroCostoId: s.centroCostoId,
+      saldoInicialDebito: s.saldoFinalDebito as unknown as number,
+      saldoInicialCredito: s.saldoFinalCredito as unknown as number,
+      debito: 0 as unknown as number,
+      credito: 0 as unknown as number,
+      saldoFinalDebito: s.saldoFinalDebito as unknown as number,
+      saldoFinalCredito: s.saldoFinalCredito as unknown as number,
+      libroContableId: s.libroContableId,
+      unidadNegocioId: s.unidadNegocioId,
+      centroOperacionId: s.centroOperacionId,
+      categorizacionId: s.categorizacionId,
+      cierre: false,
+      modeloCarteraId: s.modeloCarteraId,
+      modeloCartera: s.modeloCartera,
+      conceptoTributarioId: s.conceptoTributarioId,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }));
+
+    const batch = await prisma.saldoContable.createMany({ data: mapped });
+    return Number(batch.count ?? mapped.length);
+  }
+
+  async countByPeriodo(periodoId: number): Promise<number> {
+    const count = await prisma.saldoContable.count({ where: { periodoId } });
+    return Number(count);
+  }
+
   async updateByKey(key: SaldoContableKey, values: SaldoContableUpdateValues): Promise<void> {
     const where: { periodoId: number; terceroId?: number; cuentaContableId?: number; centroCostoId?: number } = {
       periodoId: key.PeriodoId,

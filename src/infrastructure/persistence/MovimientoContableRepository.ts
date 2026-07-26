@@ -67,6 +67,22 @@ export class MovimientoContableRepository implements IMovimientoContableReposito
     return rows.map((r) => Number(r.periodoId!));
   }
 
+  async getPeriodoPorFecha(fecha: Date): Promise<number | null> {
+    const rows = await prisma.saldoContablePeriodo.findMany({
+      where: {
+        periodoInicio: { lte: fecha },
+        OR: [{ periodoFin: null }, { periodoFin: { gte: fecha } }],
+      },
+      select: { id: true },
+      orderBy: { periodoInicio: 'desc' },
+      take: 1,
+    });
+
+    if (rows.length === 0) return null;
+    const firstRow = rows[0];
+    return firstRow ? Number(firstRow.id) : null;
+  }
+
   async getBatchByPeriodo(periodoId: number, batchSize: number, lastId?: number): Promise<MovimientoContable[]> {
     const where: { periodoId: number; id?: { gt: number } } = {
       periodoId,
