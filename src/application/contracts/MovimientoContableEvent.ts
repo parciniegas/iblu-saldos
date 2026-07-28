@@ -4,6 +4,8 @@ export type MovimientoContableEvent = {
   id: number;
   fecha: Date;
   estado: string;
-  cuentas: Omit<MovimientoContableCuentaAgrupadaRow, 'RegistrosMovimientoContableCuenta'>[];
+  PeriodoId: number;
+  cuentas: Omit<MovimientoContableCuentaAgrupadaRow, 'RegistrosMovimientoContableCuenta' | 'PeriodoId'>[];
   Estado: 'Creado' | 'Borrado';
+  CorrelationId: string;
 };

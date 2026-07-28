@@ -20,16 +20,14 @@ function createMockRepositories(): {
   movimientoRepo: IMovimientoContableRepository;
   saldoRepo: ISaldoContableRepository;
   saldoPeriodoRepo: ISaldoContablePeriodoRepository;
-  getPeriodosDesdeFechaOrdenadosMock: ReturnType<typeof vi.fn>;
-  getPeriodoPorFechaMock: ReturnType<typeof vi.fn>;
+  getPeriodosDesdeIdOrdenadosMock: ReturnType<typeof vi.fn>;
 } {
-  const getPeriodosDesdeFechaOrdenadosMock = vi.fn().mockResolvedValue([]);
-  const getPeriodoPorFechaMock = vi.fn().mockResolvedValue(null);
+  const getPeriodosDesdeIdOrdenadosMock = vi.fn().mockResolvedValue([]);
   const movimientoRepo = {
     getCuentasAgrupadasPorMovimientos: vi.fn().mockResolvedValue([]),
     getPeriodosDesdeFecha: vi.fn().mockResolvedValue([]),
     getBatchByPeriodo: vi.fn().mockResolvedValue([]),
-    getPeriodoPorFecha: getPeriodoPorFechaMock,
+    getPeriodoPorFecha: vi.fn().mockResolvedValue(null),
   } as unknown as IMovimientoContableRepository;
 
   const saldoRepo = {
@@ -40,10 +38,15 @@ function createMockRepositories(): {
   } as unknown as ISaldoContableRepository;
 
   const saldoPeriodoRepo = {
-    getPeriodosDesdeFechaOrdenados: getPeriodosDesdeFechaOrdenadosMock,
+    getPeriodosDesdeFechaOrdenados: vi.fn().mockResolvedValue([]),
+    getByNombre: vi.fn().mockResolvedValue(null),
+    getUltimoPeriodo: vi.fn().mockResolvedValue(null),
+    existsByNombre: vi.fn().mockResolvedValue(false),
+    create: vi.fn().mockResolvedValue({ id: 1 }),
+    getPeriodosDesdeIdOrdenados: getPeriodosDesdeIdOrdenadosMock,
   } as unknown as ISaldoContablePeriodoRepository;
 
-  return { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodosDesdeFechaOrdenadosMock, getPeriodoPorFechaMock };
+  return { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodosDesdeIdOrdenadosMock };
 }
 
 function createEvent(overrides: Partial<MovimientoContableEvent> = {}): MovimientoContableEvent {
@@ -53,18 +56,19 @@ function createEvent(overrides: Partial<MovimientoContableEvent> = {}): Movimien
     estado: 'APROBADO',
     cuentas: [],
     Estado: 'Creado',
+    CorrelationId: 'test-correlation-id',
     ...overrides,
   };
 }
 
 describe('MessageProcessor', () => {
-  it('debe omitir el procesamiento cuando no se encuentra periodo para la fecha del movimiento', async () => {
-    const { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodoPorFechaMock } = createMockRepositories();
+  it('debe omitir el procesamiento cuando no hay periodos desde el PeriodoId del evento', async () => {
+    const { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodosDesdeIdOrdenadosMock } = createMockRepositories();
 
-    getPeriodoPorFechaMock.mockResolvedValue(null);
+    getPeriodosDesdeIdOrdenadosMock.mockResolvedValue([]);
 
     const processor = new MessageProcessor(movimientoRepo, saldoRepo, saldoPeriodoRepo, mockLogger);
-    const event = createEvent();
+    const event = createEvent({ PeriodoId: 10 });
 
     await processor.process(event, 1000);
 
@@ -72,15 +76,13 @@ describe('MessageProcessor', () => {
     expect(movimientoRepo.getBatchByPeriodo).not.toHaveBeenCalled();
   });
 
-  it('debe omitir cuando no hay periodos desde la fecha del movimiento', async () => {
-    const { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodoPorFechaMock, getPeriodosDesdeFechaOrdenadosMock } =
-      createMockRepositories();
+  it('debe omitir cuando no hay periodos desde el PeriodoId del evento (caso 2)', async () => {
+    const { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodosDesdeIdOrdenadosMock } = createMockRepositories();
 
-    getPeriodoPorFechaMock.mockResolvedValue(10);
-    getPeriodosDesdeFechaOrdenadosMock.mockResolvedValue([]);
+    getPeriodosDesdeIdOrdenadosMock.mockResolvedValue([]);
 
     const processor = new MessageProcessor(movimientoRepo, saldoRepo, saldoPeriodoRepo, mockLogger);
-    const event = createEvent();
+    const event = createEvent({ PeriodoId: 99 });
 
     await processor.process(event, 1000);
 
@@ -88,12 +90,11 @@ describe('MessageProcessor', () => {
   });
 
   it('debe procesar un evento "Creado" sumando Debito y Credito', async () => {
-    const { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodoPorFechaMock, getPeriodosDesdeFechaOrdenadosMock } =
+    const { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodosDesdeIdOrdenadosMock } =
       createMockRepositories();
 
     const periodos: SaldoContablePeriodo[] = [{ id: 10, nombre: '2024-01', periodoInicio: new Date('2024-01-01'), cierre: false, cierreAnio: false }];
-    getPeriodoPorFechaMock.mockResolvedValue(10);
-    getPeriodosDesdeFechaOrdenadosMock.mockResolvedValue(periodos);
+    getPeriodosDesdeIdOrdenadosMock.mockResolvedValue(periodos);
 
     movimientoRepo.getBatchByPeriodo
       .mockResolvedValueOnce([{ id: 100, periodoId: 10 } as MovimientoContable])
@@ -115,10 +116,10 @@ describe('MessageProcessor', () => {
 
     const processor = new MessageProcessor(movimientoRepo, saldoRepo, saldoPeriodoRepo, mockLogger);
     const event = createEvent({
+      PeriodoId: 10,
       cuentas: [
         {
           MovimientoContableId: 100,
-          PeriodoId: 10,
           CuentaContableId: 1105,
           TerceroId: 200,
           CentroCostoId: 10,
@@ -142,12 +143,11 @@ describe('MessageProcessor', () => {
   });
 
   it('debe procesar un evento "Borrado" restando Debito y Credito', async () => {
-    const { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodoPorFechaMock, getPeriodosDesdeFechaOrdenadosMock } =
+    const { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodosDesdeIdOrdenadosMock } =
       createMockRepositories();
 
     const periodos: SaldoContablePeriodo[] = [{ id: 10, nombre: '2024-01', periodoInicio: new Date('2024-01-01'), cierre: false, cierreAnio: false }];
-    getPeriodoPorFechaMock.mockResolvedValue(10);
-    getPeriodosDesdeFechaOrdenadosMock.mockResolvedValue(periodos);
+    getPeriodosDesdeIdOrdenadosMock.mockResolvedValue(periodos);
 
     movimientoRepo.getBatchByPeriodo
       .mockResolvedValueOnce([{ id: 100, periodoId: 10 } as MovimientoContable])
@@ -169,11 +169,11 @@ describe('MessageProcessor', () => {
 
     const processor = new MessageProcessor(movimientoRepo, saldoRepo, saldoPeriodoRepo, mockLogger);
     const event = createEvent({
+      PeriodoId: 10,
       Estado: 'Borrado',
       cuentas: [
         {
           MovimientoContableId: 100,
-          PeriodoId: 10,
           CuentaContableId: 1105,
           TerceroId: 200,
           CentroCostoId: 10,
@@ -197,12 +197,11 @@ describe('MessageProcessor', () => {
   });
 
   it('debe excluir el movimiento borrado de la agregación del periodo', async () => {
-    const { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodoPorFechaMock, getPeriodosDesdeFechaOrdenadosMock } =
+    const { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodosDesdeIdOrdenadosMock } =
       createMockRepositories();
 
     const periodos: SaldoContablePeriodo[] = [{ id: 10, nombre: '2024-01', periodoInicio: new Date('2024-01-01'), cierre: false, cierreAnio: false }];
-    getPeriodoPorFechaMock.mockResolvedValue(10);
-    getPeriodosDesdeFechaOrdenadosMock.mockResolvedValue(periodos);
+    getPeriodosDesdeIdOrdenadosMock.mockResolvedValue(periodos);
 
     movimientoRepo.getBatchByPeriodo
       .mockResolvedValueOnce([
@@ -228,12 +227,12 @@ describe('MessageProcessor', () => {
 
     const processor = new MessageProcessor(movimientoRepo, saldoRepo, saldoPeriodoRepo, mockLogger);
     const event = createEvent({
+      PeriodoId: 10,
       id: 100,
       Estado: 'Borrado',
       cuentas: [
         {
           MovimientoContableId: 100,
-          PeriodoId: 10,
           CuentaContableId: 1105,
           TerceroId: 200,
           CentroCostoId: 10,
@@ -250,7 +249,7 @@ describe('MessageProcessor', () => {
   });
 
   it('debe recalcular todos los periodos desde el periodo del movimiento', async () => {
-    const { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodoPorFechaMock, getPeriodosDesdeFechaOrdenadosMock } =
+    const { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodosDesdeIdOrdenadosMock } =
       createMockRepositories();
 
     const periodos: SaldoContablePeriodo[] = [
@@ -258,14 +257,13 @@ describe('MessageProcessor', () => {
       { id: 20, nombre: '2024-02', periodoInicio: new Date('2024-02-01'), cierre: false, cierreAnio: false },
       { id: 30, nombre: '2024-03', periodoInicio: new Date('2024-03-01'), cierre: false, cierreAnio: false },
     ];
-    getPeriodoPorFechaMock.mockResolvedValue(10);
-    getPeriodosDesdeFechaOrdenadosMock.mockResolvedValue(periodos);
+    getPeriodosDesdeIdOrdenadosMock.mockResolvedValue(periodos);
 
     movimientoRepo.getBatchByPeriodo.mockResolvedValue([]);
     saldoRepo.getByPeriodo.mockResolvedValue([]);
 
     const processor = new MessageProcessor(movimientoRepo, saldoRepo, saldoPeriodoRepo, mockLogger);
-    const event = createEvent();
+    const event = createEvent({ PeriodoId: 10 });
 
     await processor.process(event, 1000);
 
@@ -277,15 +275,14 @@ describe('MessageProcessor', () => {
   });
 
   it('debe procesar eventos con múltiples periodos aplicando saldo final del periodo anterior como inicial del siguiente', async () => {
-    const { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodoPorFechaMock, getPeriodosDesdeFechaOrdenadosMock } =
+    const { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodosDesdeIdOrdenadosMock } =
       createMockRepositories();
 
     const periodos: SaldoContablePeriodo[] = [
       { id: 10, nombre: '2024-01', periodoInicio: new Date('2024-01-01'), cierre: false, cierreAnio: false },
       { id: 20, nombre: '2024-02', periodoInicio: new Date('2024-02-01'), cierre: false, cierreAnio: false },
     ];
-    getPeriodoPorFechaMock.mockResolvedValue(10);
-    getPeriodosDesdeFechaOrdenadosMock.mockResolvedValue(periodos);
+    getPeriodosDesdeIdOrdenadosMock.mockResolvedValue(periodos);
 
     movimientoRepo.getBatchByPeriodo.mockResolvedValue([]);
 
@@ -295,10 +292,10 @@ describe('MessageProcessor', () => {
 
     const processor = new MessageProcessor(movimientoRepo, saldoRepo, saldoPeriodoRepo, mockLogger);
     const event = createEvent({
+      PeriodoId: 10,
       cuentas: [
         {
           MovimientoContableId: 100,
-          PeriodoId: 10,
           CuentaContableId: 1105,
           TerceroId: 200,
           CentroCostoId: 10,

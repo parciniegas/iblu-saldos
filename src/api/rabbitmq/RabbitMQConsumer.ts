@@ -1,6 +1,7 @@
 import * as amqplib from 'amqplib';
 import pino from 'pino';
 import type { MovimientoContableEvent } from '../../application/contracts/MovimientoContableEvent.js';
+import { parseAndNormalizeMovimientoEvent } from '../../application/contracts/MovimientoContableEvent.schema.js';
 import type { MessageProcessor } from './MessageProcessor.js';
 import { URL } from 'node:url';
 
@@ -103,15 +104,25 @@ export class RabbitMQConsumer {
 
       const started = Date.now();
       const payloadText = msg.content.toString();
-      const content = JSON.parse(payloadText) as MovimientoContableEvent;
-      this.logger.info({ ...meta, movimientoId: content.id, estado: content.Estado }, '[RABBITMQ] Procesando evento');
+      const raw = JSON.parse(payloadText);
+      const content = parseAndNormalizeMovimientoEvent(raw) as MovimientoContableEvent;
+      if (msg.properties?.correlationId && msg.properties.correlationId !== content.CorrelationId) {
+        this.logger.warn({ ...meta, payloadCorrelationId: content.CorrelationId }, '[RABBITMQ] correlationId AMQP != CorrelationId payload');
+      }
+      this.logger.info({ ...meta, correlationId: content.CorrelationId, movimientoId: content.id, estado: content.Estado }, '[RABBITMQ] Procesando evento');
       await this.processor.process(content, 1000);
       const durationMs = Date.now() - started;
       this.channel?.ack(msg);
-      this.logger.info({ ...meta, movimientoId: content.id, durationMs }, '[RABBITMQ] Mensaje ACK');
+      this.logger.info({ ...meta, correlationId: content.CorrelationId, movimientoId: content.id, durationMs }, '[RABBITMQ] Mensaje ACK');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const meta = this.messageMeta(msg);
+      // Si el error es de validación, no reencolar: DLQ directo
+      if ((error as any)?.code === 'INVALID_EVENT_PAYLOAD') {
+        this.logger.error({ ...meta, error: errorMessage }, '[RABBITMQ] Evento inválido. Enviando a DLQ sin reintentos');
+        this.channel?.nack(msg, false, false);
+        return;
+      }
       this.logger.error({ ...meta, error: errorMessage }, '[RABBITMQ] Error procesando mensaje');
 
       const retryCount = this.getRetryCount(msg);

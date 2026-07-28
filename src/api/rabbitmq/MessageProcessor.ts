@@ -20,28 +20,15 @@ export class MessageProcessor {
   async process(event: MovimientoContableEvent, batchSize: number): Promise<void> {
     const movimientoId = event.id;
     const estado = event.Estado;
-    const fecha = event.fecha;
+    const periodoInicioId = event.PeriodoId;
 
-    this.logger.info({ movimientoId, estado, fecha }, '[RABBITMQ] Procesando evento de movimiento');
+    this.logger.info({ movimientoId, estado, periodoId: periodoInicioId }, '[RABBITMQ] Procesando evento de movimiento');
 
     const effectiveBatchSize = Math.min(MAX_BATCH_SIZE, Math.max(MIN_BATCH_SIZE, batchSize));
 
-    // Normalize to local date boundary; repositories are expected to normalize to UTC internally
-    const periodoId = await this.movimientoRepo.getPeriodoPorFecha(
-      new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate()),
-    );
-    if (periodoId === null) {
-      this.logger.warn({ movimientoId, fecha }, '[RABBITMQ] No se encontró periodo para la fecha del movimiento, omitiendo');
-      return;
-    }
-
-    this.logger.info({ movimientoId, periodoId }, '[RABBITMQ] Periodo del movimiento determinado');
-
-    const periodosObjetos = await this.saldoPeriodoRepo.getPeriodosDesdeFechaOrdenados(
-      new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate()),
-    );
+    const periodosObjetos = await this.saldoPeriodoRepo.getPeriodosDesdeIdOrdenados(periodoInicioId);
     if (periodosObjetos.length === 0) {
-      this.logger.info({ movimientoId }, '[RABBITMQ] No hay periodos desde la fecha del movimiento, omitiendo recálculo');
+      this.logger.info({ movimientoId, periodoInicioId }, '[RABBITMQ] No hay periodos desde el periodo indicado, omitiendo recálculo');
       return;
     }
 
@@ -159,8 +146,6 @@ export class MessageProcessor {
     if (eventForThisPeriod && Array.isArray(eventForThisPeriod.cuentas) && eventForThisPeriod.cuentas.length > 0) {
       if (estado === 'Borrado') {
         for (const cuenta of eventForThisPeriod.cuentas) {
-          // Solo aplicar si corresponde al periodo actual
-          if (cuenta.PeriodoId && Number(cuenta.PeriodoId) !== Number(periodoId)) continue;
           const saldoKey = this.buildSaldoKey(
             periodoId,
             cuenta.TerceroId,

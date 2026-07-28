@@ -31,6 +31,32 @@ export class SaldoContablePeriodoRepository implements ISaldoContablePeriodoRepo
     } satisfies SaldoContablePeriodo));
   }
 
+  async getPeriodosDesdeIdOrdenados(periodoId: number): Promise<SaldoContablePeriodo[]> {
+    const rows = await prisma.saldoContablePeriodo.findMany({
+      orderBy: { nombre: 'asc' },
+      select: {
+        id: true,
+        nombre: true,
+        periodoInicio: true,
+        periodoFin: true,
+        cierre: true,
+        cierreAnio: true,
+      },
+    });
+
+    const startIndex = rows.findIndex((r) => Number(r.id) === Number(periodoId));
+    if (startIndex === -1) return [];
+    const desde = rows.slice(startIndex);
+    return desde.map((r) => ({
+      id: Number(r.id),
+      nombre: r.nombre,
+      periodoInicio: r.periodoInicio ?? undefined,
+      periodoFin: r.periodoFin ?? undefined,
+      cierre: r.cierre,
+      cierreAnio: r.cierreAnio,
+    } satisfies SaldoContablePeriodo));
+  }
+
   async existsByNombre(nombre: string): Promise<boolean> {
     const found = await prisma.saldoContablePeriodo.findFirst({ where: { nombre }, select: { id: true } });
     return !!found;

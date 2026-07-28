@@ -4,6 +4,8 @@ import type { SaldoContablePeriodo } from '../contracts/SaldoContablePeriodo.js'
 export interface ISaldoContablePeriodoRepository {
   // Devuelve los periodos cuyo periodoInicio >= fechaDesde, ordenados por nombre ASC
   getPeriodosDesdeFechaOrdenados(fechaDesde: Date): Promise<SaldoContablePeriodo[]>;
+  // Devuelve los periodos desde un id dado, ordenados cronológicamente por nombre ASC
+  getPeriodosDesdeIdOrdenados(periodoId: number): Promise<SaldoContablePeriodo[]>;
   existsByNombre(nombre: string): Promise<boolean>;
   getByNombre(nombre: string): Promise<SaldoContablePeriodo | null>;
   getUltimoPeriodo(): Promise<SaldoContablePeriodo | null>;
