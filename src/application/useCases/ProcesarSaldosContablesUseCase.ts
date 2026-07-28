@@ -275,7 +275,17 @@ export class ProcesarSaldosContablesUseCase {
 
     for (const saldo of saldosDelPeriodo) {
       saldosByKey.set(
-        this.buildSaldoKey(periodoId, saldo.terceroId, saldo.cuentaContableId, saldo.centroCostoId),
+        this.buildSaldoKey(
+          periodoId,
+          saldo.terceroId,
+          saldo.cuentaContableId,
+          saldo.centroCostoId,
+          saldo.libroContableId,
+          saldo.unidadNegocioId,
+          saldo.centroOperacionId,
+          saldo.categorizacionId,
+          saldo.modeloCarteraId,
+        ),
         saldo,
       );
     }
@@ -305,6 +315,11 @@ export class ProcesarSaldosContablesUseCase {
           cuenta.TerceroId,
           cuenta.CuentaContableId,
           cuenta.CentroCostoId,
+          cuenta.LibroContableId,
+          cuenta.UnidadNegocioId,
+          cuenta.CentroOperacionId,
+          cuenta.CategorizacionId,
+          cuenta.ModeloCarteraId,
         );
         let saldo = saldosByKey.get(saldoKey);
 
@@ -389,7 +404,20 @@ export class ProcesarSaldosContablesUseCase {
     let lastLoggedPercent = 0;
 
     for (const saldo of saldos) {
-      saldosByKey.set(this.buildSaldoKey(periodoId, saldo.terceroId, saldo.cuentaContableId, saldo.centroCostoId), saldo);
+      saldosByKey.set(
+        this.buildSaldoKey(
+          periodoId,
+          saldo.terceroId,
+          saldo.cuentaContableId,
+          saldo.centroCostoId,
+          saldo.libroContableId,
+          saldo.unidadNegocioId,
+          saldo.centroOperacionId,
+          saldo.categorizacionId,
+          saldo.modeloCarteraId,
+        ),
+        saldo,
+      );
     }
 
     for (let saldoIndex = 0; saldoIndex < saldos.length; saldoIndex++) {
@@ -416,12 +444,19 @@ export class ProcesarSaldosContablesUseCase {
     }
 
     for (const update of pendingUpdates) {
-      const saldo = saldosByKey.get(this.buildSaldoKey(
-        update.key.PeriodoId,
-        update.key.TerceroId,
-        update.key.CuentaContableId,
-        update.key.CentroCostoId,
-      ));
+      const saldo = saldosByKey.get(
+        this.buildSaldoKey(
+          update.key.PeriodoId,
+          update.key.TerceroId,
+          update.key.CuentaContableId,
+          update.key.CentroCostoId,
+          update.key.LibroContableId,
+          update.key.UnidadNegocioId,
+          update.key.CentroOperacionId,
+          update.key.CategorizacionId,
+          update.key.ModeloCarteraId,
+        ),
+      );
       if (!saldo) continue;
 
       saldo.saldoInicialDebito = update.values.SaldoInicialDebito;
@@ -452,7 +487,17 @@ export class ProcesarSaldosContablesUseCase {
     const priorSaldos = await this.saldoRepo.getByPeriodo(priorPeriodId);
     for (const priorSaldo of priorSaldos) {
       priorSaldosByKey.set(
-        this.buildSaldoKey(priorPeriodId, priorSaldo.terceroId, priorSaldo.cuentaContableId, priorSaldo.centroCostoId),
+        this.buildSaldoKey(
+          priorPeriodId,
+          priorSaldo.terceroId,
+          priorSaldo.cuentaContableId,
+          priorSaldo.centroCostoId,
+          priorSaldo.libroContableId,
+          priorSaldo.unidadNegocioId,
+          priorSaldo.centroOperacionId,
+          priorSaldo.categorizacionId,
+          priorSaldo.modeloCarteraId,
+        ),
         priorSaldo,
       );
     }
@@ -471,16 +516,28 @@ export class ProcesarSaldosContablesUseCase {
       TerceroId: saldo.terceroId,
       CuentaContableId: saldo.cuentaContableId,
       CentroCostoId: saldo.centroCostoId,
+      LibroContableId: saldo.libroContableId,
+      UnidadNegocioId: saldo.unidadNegocioId,
+      CentroOperacionId: saldo.centroOperacionId,
+      CategorizacionId: saldo.categorizacionId,
+      ModeloCarteraId: saldo.modeloCarteraId,
     };
 
     const priorSaldo = priorPeriodId === null
       ? undefined
-      : priorSaldosByKey.get(this.buildSaldoKey(
-        priorPeriodId,
-        saldo.terceroId,
-        saldo.cuentaContableId,
-        saldo.centroCostoId,
-      ));
+      : priorSaldosByKey.get(
+        this.buildSaldoKey(
+          priorPeriodId,
+          saldo.terceroId,
+          saldo.cuentaContableId,
+          saldo.centroCostoId,
+          saldo.libroContableId,
+          saldo.unidadNegocioId,
+          saldo.centroOperacionId,
+          saldo.categorizacionId,
+          saldo.modeloCarteraId,
+        ),
+      );
 
     const saldoInicialDebito = priorSaldo?.saldoFinalDebito ?? 0;
     const saldoInicialCredito = priorSaldo?.saldoFinalCredito ?? 0;
@@ -500,8 +557,28 @@ export class ProcesarSaldosContablesUseCase {
     };
   }
 
-  private buildSaldoKey(periodoId: number, terceroId?: number, cuentaContableId?: number, centroCostoId?: number): string {
-    return [periodoId, terceroId ?? 'null', cuentaContableId ?? 'null', centroCostoId ?? 'null'].join('|');
+  private buildSaldoKey(
+    periodoId: number,
+    terceroId?: number,
+    cuentaContableId?: number,
+    centroCostoId?: number,
+    libroContableId?: number,
+    unidadNegocioId?: number,
+    centroOperacionId?: number,
+    categorizacionId?: number,
+    modeloCarteraId?: number,
+  ): string {
+    return [
+      periodoId,
+      terceroId ?? 'null',
+      cuentaContableId ?? 'null',
+      centroCostoId ?? 'null',
+      libroContableId ?? 'null',
+      unidadNegocioId ?? 'null',
+      centroOperacionId ?? 'null',
+      categorizacionId ?? 'null',
+      modeloCarteraId ?? 'null',
+    ].join('|');
   }
 
   private createEmptySaldo(periodoId: number, cuenta: MovimientoContableCuentaAgrupadaRow): SaldoContable {

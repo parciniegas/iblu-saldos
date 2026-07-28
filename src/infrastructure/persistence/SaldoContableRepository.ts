@@ -10,15 +10,8 @@ const BULK_UPDATE_CHUNK_SIZE_ENV = 'SALDOS_BULK_UPDATE_CHUNK_SIZE';
 
 export class SaldoContableRepository implements ISaldoContableRepository {
   async getByKey(key: SaldoContableKey): Promise<SaldoContable | null> {
-    const where: { periodoId: number; terceroId?: number; cuentaContableId?: number; centroCostoId?: number } = {
-      periodoId: key.PeriodoId,
-    };
-
-    if (key.TerceroId !== undefined) where.terceroId = key.TerceroId;
-    if (key.CuentaContableId !== undefined) where.cuentaContableId = key.CuentaContableId;
-    if (key.CentroCostoId !== undefined) where.centroCostoId = key.CentroCostoId;
-
-    const saldo = await prisma.saldoContable.findFirst({ where });
+    const where: Prisma.SaldoContableWhereInput = this.buildWhereFromKey(key);
+    const saldo = await prisma.saldoContable.findFirst({ where: where });
 
     if (!saldo) return null;
 
@@ -123,13 +116,7 @@ export class SaldoContableRepository implements ISaldoContableRepository {
   }
 
   async updateByKey(key: SaldoContableKey, values: SaldoContableUpdateValues): Promise<void> {
-    const where: { periodoId: number; terceroId?: number; cuentaContableId?: number; centroCostoId?: number } = {
-      periodoId: key.PeriodoId,
-    };
-
-    if (key.TerceroId !== undefined) where.terceroId = key.TerceroId;
-    if (key.CuentaContableId !== undefined) where.cuentaContableId = key.CuentaContableId;
-    if (key.CentroCostoId !== undefined) where.centroCostoId = key.CentroCostoId;
+    const where: Prisma.SaldoContableWhereInput = this.buildWhereFromKey(key);
 
     const updateData: Record<string, unknown> = { updatedAt: new Date() };
 
@@ -141,7 +128,32 @@ export class SaldoContableRepository implements ISaldoContableRepository {
     if (values.SaldoFinalCredito !== undefined) updateData.saldoFinalCredito = values.SaldoFinalCredito;
     if (values.Cierre !== undefined) updateData.cierre = values.Cierre;
 
-    await prisma.saldoContable.updateMany({ where, data: updateData });
+    const result = await prisma.saldoContable.updateMany({ where, data: updateData });
+    if ((result?.count ?? 0) === 0) {
+      // Upsert: crear si no existe exactamente ese saldo
+      await prisma.saldoContable.create({
+        data: {
+          periodoId: key.PeriodoId,
+          terceroId: key.TerceroId ?? null,
+          cuentaContableId: key.CuentaContableId ?? null,
+          centroCostoId: key.CentroCostoId ?? null,
+          libroContableId: key.LibroContableId ?? null,
+          unidadNegocioId: key.UnidadNegocioId ?? null,
+          centroOperacionId: key.CentroOperacionId ?? null,
+          categorizacionId: key.CategorizacionId ?? null,
+          modeloCarteraId: key.ModeloCarteraId ?? null,
+          saldoInicialDebito: values.SaldoInicialDebito ?? 0,
+          saldoInicialCredito: values.SaldoInicialCredito ?? 0,
+          debito: values.Debito ?? 0,
+          credito: values.Credito ?? 0,
+          saldoFinalDebito: values.SaldoFinalDebito ?? (values.SaldoInicialDebito ?? 0) + (values.Debito ?? 0),
+          saldoFinalCredito: values.SaldoFinalCredito ?? (values.SaldoInicialCredito ?? 0) + (values.Credito ?? 0),
+          cierre: values.Cierre ?? false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
+    }
   }
 
   async getByPeriodo(periodoId: number): Promise<SaldoContable[]> {
@@ -280,5 +292,20 @@ export class SaldoContableRepository implements ISaldoContableRepository {
       modeloCartera: saldo.modeloCartera ?? undefined,
       conceptoTributarioId: saldo.conceptoTributarioId != null ? Number(saldo.conceptoTributarioId) : undefined,
     };
+  }
+
+  private buildWhereFromKey(key: SaldoContableKey): Prisma.SaldoContableWhereInput {
+    // Igualdad exacta en 9 dimensiones; undefined => null explícito
+    return {
+      periodoId: key.PeriodoId,
+      cuentaContableId: key.CuentaContableId ?? null,
+      terceroId: key.TerceroId ?? null,
+      centroCostoId: key.CentroCostoId ?? null,
+      libroContableId: key.LibroContableId ?? null,
+      unidadNegocioId: key.UnidadNegocioId ?? null,
+      centroOperacionId: key.CentroOperacionId ?? null,
+      categorizacionId: key.CategorizacionId ?? null,
+      modeloCarteraId: key.ModeloCarteraId ?? null,
+    } as Prisma.SaldoContableWhereInput;
   }
 }

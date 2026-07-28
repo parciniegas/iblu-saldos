@@ -91,7 +91,20 @@ export class MessageProcessor {
 
     const saldosByKey = new Map<string, SaldoContable>();
     for (const saldo of saldosDelPeriodo) {
-      saldosByKey.set(this.buildSaldoKey(periodoId, saldo.terceroId, saldo.cuentaContableId, saldo.centroCostoId), saldo);
+      saldosByKey.set(
+        this.buildSaldoKey(
+          periodoId,
+          saldo.terceroId,
+          saldo.cuentaContableId,
+          saldo.centroCostoId,
+          saldo.libroContableId,
+          saldo.unidadNegocioId,
+          saldo.centroOperacionId,
+          saldo.categorizacionId,
+          saldo.modeloCarteraId,
+        ),
+        saldo,
+      );
     }
 
     let lastId: number | undefined;
@@ -121,6 +134,11 @@ export class MessageProcessor {
           cuenta.TerceroId,
           cuenta.CuentaContableId,
           cuenta.CentroCostoId,
+          cuenta.LibroContableId,
+          cuenta.UnidadNegocioId,
+          cuenta.CentroOperacionId,
+          cuenta.CategorizacionId,
+          cuenta.ModeloCarteraId,
         );
         let saldo = saldosByKey.get(saldoKey);
 
@@ -143,7 +161,17 @@ export class MessageProcessor {
         for (const cuenta of eventForThisPeriod.cuentas) {
           // Solo aplicar si corresponde al periodo actual
           if (cuenta.PeriodoId && Number(cuenta.PeriodoId) !== Number(periodoId)) continue;
-          const saldoKey = this.buildSaldoKey(periodoId, cuenta.TerceroId, cuenta.CuentaContableId, cuenta.CentroCostoId);
+          const saldoKey = this.buildSaldoKey(
+            periodoId,
+            cuenta.TerceroId,
+            cuenta.CuentaContableId,
+            cuenta.CentroCostoId,
+            cuenta.LibroContableId,
+            cuenta.UnidadNegocioId,
+            cuenta.CentroOperacionId,
+            cuenta.CategorizacionId,
+            cuenta.ModeloCarteraId,
+          );
           let saldo = saldosByKey.get(saldoKey);
           if (!saldo) {
             // Crear saldo vacío compatible con MovimientoContableCuentaAgrupadaRow
@@ -200,7 +228,17 @@ export class MessageProcessor {
       const priorSaldo = priorPeriodId === null
         ? undefined
         : priorSaldosByKey.get(
-            this.buildSaldoKey(priorPeriodId, saldo.terceroId, saldo.cuentaContableId, saldo.centroCostoId),
+            this.buildSaldoKey(
+              priorPeriodId,
+              saldo.terceroId,
+              saldo.cuentaContableId,
+              saldo.centroCostoId,
+              saldo.libroContableId,
+              saldo.unidadNegocioId,
+              saldo.centroOperacionId,
+              saldo.categorizacionId,
+              saldo.modeloCarteraId,
+            ),
           );
 
       const saldoInicialDebito = priorSaldo?.saldoFinalDebito ?? 0;
@@ -209,7 +247,17 @@ export class MessageProcessor {
       const saldoFinalCredito = saldoInicialCredito + saldo.credito;
 
       await this.saldoRepo.updateByKey(
-        { PeriodoId: periodoId, TerceroId: saldo.terceroId, CuentaContableId: saldo.cuentaContableId, CentroCostoId: saldo.centroCostoId },
+        {
+          PeriodoId: periodoId,
+          TerceroId: saldo.terceroId,
+          CuentaContableId: saldo.cuentaContableId,
+          CentroCostoId: saldo.centroCostoId,
+          LibroContableId: saldo.libroContableId,
+          UnidadNegocioId: saldo.unidadNegocioId,
+          CentroOperacionId: saldo.centroOperacionId,
+          CategorizacionId: saldo.categorizacionId,
+          ModeloCarteraId: saldo.modeloCarteraId,
+        },
         {
           SaldoInicialDebito: saldoInicialDebito,
           SaldoInicialCredito: saldoInicialCredito,
@@ -233,7 +281,17 @@ export class MessageProcessor {
       : await this.saldoRepo.getByPeriodo(priorPeriodId);
     for (const priorSaldo of priorSaldos) {
       priorSaldosByKey.set(
-        this.buildSaldoKey(priorPeriodId, priorSaldo.terceroId, priorSaldo.cuentaContableId, priorSaldo.centroCostoId),
+        this.buildSaldoKey(
+          priorPeriodId,
+          priorSaldo.terceroId,
+          priorSaldo.cuentaContableId,
+          priorSaldo.centroCostoId,
+          priorSaldo.libroContableId,
+          priorSaldo.unidadNegocioId,
+          priorSaldo.centroOperacionId,
+          priorSaldo.categorizacionId,
+          priorSaldo.modeloCarteraId,
+        ),
         priorSaldo,
       );
     }
@@ -241,8 +299,28 @@ export class MessageProcessor {
     return priorSaldosByKey;
   }
 
-  private buildSaldoKey(periodoId: number, terceroId?: number, cuentaContableId?: number, centroCostoId?: number): string {
-    return [periodoId, terceroId ?? 'null', cuentaContableId ?? 'null', centroCostoId ?? 'null'].join('|');
+  private buildSaldoKey(
+    periodoId: number,
+    terceroId?: number,
+    cuentaContableId?: number,
+    centroCostoId?: number,
+    libroContableId?: number,
+    unidadNegocioId?: number,
+    centroOperacionId?: number,
+    categorizacionId?: number,
+    modeloCarteraId?: number,
+  ): string {
+    return [
+      periodoId,
+      terceroId ?? 'null',
+      cuentaContableId ?? 'null',
+      centroCostoId ?? 'null',
+      libroContableId ?? 'null',
+      unidadNegocioId ?? 'null',
+      centroOperacionId ?? 'null',
+      categorizacionId ?? 'null',
+      modeloCarteraId ?? 'null',
+    ].join('|');
   }
 
   private createEmptySaldo(periodoId: number, cuenta: MovimientoContableCuentaAgrupadaRow): SaldoContable {

@@ -84,6 +84,7 @@ model SaldoContable {
   conceptoTributarioId BigInt?   @map("conceptotributario_id") @db.UnsignedBigInt
 
   @@index([periodoId, terceroId, cuentaContableId, centroCostoId], map: "saldos_contables_periodo_id_IDX")
+  @@index([periodoId, cuentaContableId, terceroId, centroCostoId, libroContableId, unidadNegocioId, centroOperacionId, categorizacionId, modeloCarteraId], map: "saldos_contables_dim9_IDX")
   @@map("saldos_contables")
 }
 

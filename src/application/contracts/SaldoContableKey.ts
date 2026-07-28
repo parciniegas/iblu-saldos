@@ -3,4 +3,9 @@ export type SaldoContableKey = {
   TerceroId?: number;
   CuentaContableId?: number;
   CentroCostoId?: number;
+  LibroContableId?: number;
+  UnidadNegocioId?: number;
+  CentroOperacionId?: number;
+  CategorizacionId?: number;
+  ModeloCarteraId?: number;
 };
