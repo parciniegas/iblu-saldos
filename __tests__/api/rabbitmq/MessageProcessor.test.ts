@@ -196,59 +196,31 @@ describe('MessageProcessor', () => {
     );
   });
 
-  it('debe excluir el movimiento borrado de la agregación del periodo', async () => {
-    const { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodosDesdeIdOrdenadosMock } =
-      createMockRepositories();
+  it('no usa agregación por movimientos; aplica deltas del evento directamente por clave', async () => {
+    const { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodosDesdeIdOrdenadosMock } = createMockRepositories();
 
     const periodos: SaldoContablePeriodo[] = [{ id: 10, nombre: '2024-01', periodoInicio: new Date('2024-01-01'), cierre: false, cierreAnio: false }];
     getPeriodosDesdeIdOrdenadosMock.mockResolvedValue(periodos);
 
-    movimientoRepo.getBatchByPeriodo
-      .mockResolvedValueOnce([
-        { id: 100, periodoId: 10 } as MovimientoContable,
-        { id: 200, periodoId: 10 } as MovimientoContable,
-      ])
-      .mockResolvedValueOnce([]);
-
-    // Solo se agrupan los movimientos que NO son el borrado (id 100)
-    movimientoRepo.getCuentasAgrupadasPorMovimientos.mockResolvedValue([
-      {
-        MovimientoContableId: 200,
-        PeriodoId: 10,
-        CuentaContableId: 1105,
-        TerceroId: 200,
-        CentroCostoId: 10,
-        Debito: 300,
-        Credito: 100,
-      } as unknown as MovimientoContableCuentaAgrupadaRow,
-    ]);
-
-    saldoRepo.getByPeriodo.mockResolvedValue([{ id: 1, periodoId: 10, terceroId: 200, cuentaContableId: 1105, centroCostoId: 10 } as SaldoContable]);
-
     const processor = new MessageProcessor(movimientoRepo, saldoRepo, saldoPeriodoRepo, mockLogger);
     const event = createEvent({
       PeriodoId: 10,
-      id: 100,
-      Estado: 'Borrado',
       cuentas: [
-        {
-          MovimientoContableId: 100,
-          CuentaContableId: 1105,
-          TerceroId: 200,
-          CentroCostoId: 10,
-          Debito: 500,
-          Credito: 150,
-        },
+        { MovimientoContableId: 100, CuentaContableId: 1105, TerceroId: 200, CentroCostoId: 10, Debito: 300, Credito: 100 } as any,
       ],
     });
 
     await processor.process(event, 1000);
 
-    // Se debe llamar getCuentasAgrupadasPorMovimientos con [200] (excluyendo 100)
-    expect(movimientoRepo.getCuentasAgrupadasPorMovimientos).toHaveBeenCalledWith([200]);
+    expect(movimientoRepo.getCuentasAgrupadasPorMovimientos).not.toHaveBeenCalled();
+    expect(movimientoRepo.getBatchByPeriodo).not.toHaveBeenCalled();
+    expect(saldoRepo.updateByKey).toHaveBeenCalledWith(
+      expect.objectContaining({ PeriodoId: 10, CuentaContableId: 1105, TerceroId: 200 }),
+      expect.objectContaining({ Debito: 300, Credito: 100 }),
+    );
   });
 
-  it('debe recalcular todos los periodos desde el periodo del movimiento', async () => {
+  it('debe aplicar deltas a todos los periodos desde el periodo del movimiento', async () => {
     const { movimientoRepo, saldoRepo, saldoPeriodoRepo, getPeriodosDesdeIdOrdenadosMock } =
       createMockRepositories();
 
@@ -259,19 +231,12 @@ describe('MessageProcessor', () => {
     ];
     getPeriodosDesdeIdOrdenadosMock.mockResolvedValue(periodos);
 
-    movimientoRepo.getBatchByPeriodo.mockResolvedValue([]);
-    saldoRepo.getByPeriodo.mockResolvedValue([]);
-
     const processor = new MessageProcessor(movimientoRepo, saldoRepo, saldoPeriodoRepo, mockLogger);
-    const event = createEvent({ PeriodoId: 10 });
+    const event = createEvent({ PeriodoId: 10, cuentas: [{ MovimientoContableId: 1, CuentaContableId: 1, Debito: 10, Credito: 5 } as any] });
 
     await processor.process(event, 1000);
-
-    expect(saldoRepo.getByPeriodo).toHaveBeenCalledTimes(3);
-    const llamadas = (saldoRepo.getByPeriodo as any).mock.calls;
-    expect(llamadas[0][0]).toBe(10);
-    expect(llamadas[1][0]).toBe(20);
-    expect(llamadas[2][0]).toBe(30);
+    const updates = (saldoRepo.updateByKey as any).mock.calls.map((c: any[]) => c[0].PeriodoId);
+    expect(updates).toEqual(expect.arrayContaining([10, 20, 30]));
   });
 
   it('debe procesar eventos con múltiples periodos aplicando saldo final del periodo anterior como inicial del siguiente', async () => {
@@ -284,11 +249,8 @@ describe('MessageProcessor', () => {
     ];
     getPeriodosDesdeIdOrdenadosMock.mockResolvedValue(periodos);
 
-    movimientoRepo.getBatchByPeriodo.mockResolvedValue([]);
-
-    saldoRepo.getByPeriodo
-      .mockResolvedValueOnce([{ id: 1, periodoId: 10, terceroId: 200, cuentaContableId: 1105, centroCostoId: 10, debito: 0, credito: 0, saldoFinalDebito: 500, saldoFinalCredito: 200 } as SaldoContable])
-      .mockResolvedValueOnce([{ id: 2, periodoId: 20, terceroId: 200, cuentaContableId: 1105, centroCostoId: 10, debito: 0, credito: 0 } as SaldoContable]);
+    // Simular que en p0 no existe saldo previo (para que inicial de p1 sea igual al delta aplicado en p0)
+    (saldoRepo.getByKey as any).mockResolvedValue(null);
 
     const processor = new MessageProcessor(movimientoRepo, saldoRepo, saldoPeriodoRepo, mockLogger);
     const event = createEvent({
@@ -311,7 +273,11 @@ describe('MessageProcessor', () => {
     const llamadasUpdate = (saldoRepo.updateByKey as any).mock.calls;
     const llamadaPeriodo20 = llamadasUpdate.find((c: any[]) => c[0].PeriodoId === 20);
     expect(llamadaPeriodo20).toBeDefined();
-    expect(llamadaPeriodo20[1].SaldoInicialDebito).toBe(500);
-    expect(llamadaPeriodo20[1].SaldoInicialCredito).toBe(200);
+    // Inicial de p1 debe ser igual a final de p0 (que corresponde al delta aplicado 100/50)
+    expect(llamadaPeriodo20[1].SaldoInicialDebito).toBe(100);
+    expect(llamadaPeriodo20[1].SaldoInicialCredito).toBe(50);
+    // En pi>0 no se deben aplicar deltas a Debito/Credito
+    expect(Object.hasOwn(llamadaPeriodo20[1], 'Debito')).toBe(false);
+    expect(Object.hasOwn(llamadaPeriodo20[1], 'Credito')).toBe(false);
   });
 });
