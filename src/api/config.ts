@@ -30,6 +30,7 @@ export type AppConfig = {
     prefetch: number;
     retryAttempts: number;
     retryDelayMs: number;
+    idempotencyEnabled?: boolean;
   };
   scheduler?: {
     createPeriodoCron?: string; // cron expresión para crear periodo automáticamente
@@ -73,6 +74,7 @@ function getDefaultConfig(): AppConfig {
       prefetch: 1,
       retryAttempts: 3,
       retryDelayMs: 5000,
+      idempotencyEnabled: false,
     },
     scheduler: { createPeriodoCron: '30 0 1 * *' },
   };
@@ -91,6 +93,7 @@ function applyEnvOverrides(config: AppConfig): AppConfig {
         prefetch: getEnvInt('RABBITMQ__Prefetch', config.rabbitmq.prefetch),
         retryAttempts: getEnvInt('RABBITMQ__RetryAttempts', config.rabbitmq.retryAttempts),
         retryDelayMs: getEnvInt('RABBITMQ__RetryDelayMs', config.rabbitmq.retryDelayMs),
+        idempotencyEnabled: getEnv('RABBITMQ__IdempotencyEnabled', String(config.rabbitmq.idempotencyEnabled ?? 'false')).toLowerCase() === 'true',
       }
     : undefined;
 

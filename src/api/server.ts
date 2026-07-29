@@ -16,6 +16,7 @@ import { MessageProcessor } from './rabbitmq/MessageProcessor.js';
 import { RabbitMQConsumer } from './rabbitmq/RabbitMQConsumer.js';
 import { createJobService } from './services/createJobService.js';
 import { PeriodoScheduler } from './scheduler/PeriodoScheduler.js';
+import { ProcessedEventRepository } from '../infrastructure/persistence/ProcessedEventRepository.js';
 
 const config = loadConfig();
 
@@ -87,9 +88,9 @@ async function start(): Promise<FastifyInstance> {
     prismaLogger.warn({ error: error instanceof Error ? error.message : String(error) }, 'Base de datos no disponible, continuando sin ella');
   }
 
-  const movimientoRepo = new MovimientoContableRepository();
   const saldoRepo = new SaldoContableRepository();
   const saldoPeriodoRepo = new SaldoContablePeriodoRepository();
+  const movimientoRepo = new MovimientoContableRepository();
   const useCase = new ProcesarSaldosContablesUseCase(movimientoRepo, saldoRepo, saldoPeriodoRepo, prismaLogger);
 
   app.decorate('movimientoRepo', movimientoRepo);
@@ -112,7 +113,14 @@ async function start(): Promise<FastifyInstance> {
   let periodoScheduler: PeriodoScheduler | null = null;
 
   if (config.rabbitmq) {
-    const messageProcessor = new MessageProcessor(movimientoRepo, saldoRepo, saldoPeriodoRepo, prismaLogger);
+    const processedEventRepo = new ProcessedEventRepository();
+    const messageProcessor = new MessageProcessor(
+      saldoRepo,
+      saldoPeriodoRepo,
+      prismaLogger,
+      processedEventRepo,
+      config.rabbitmq.idempotencyEnabled ?? false,
+    );
     rabbitmqConsumer = new RabbitMQConsumer(config.rabbitmq, messageProcessor, prismaLogger);
 
     try {

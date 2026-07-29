@@ -1,8 +1,10 @@
-import type { IMovimientoContableRepository } from '../../application/abstractions/IMovimientoContableRepository.js';
 import type { ISaldoContableRepository } from '../../application/abstractions/ISaldoContableRepository.js';
 import type { ISaldoContablePeriodoRepository } from '../../application/abstractions/ISaldoContablePeriodoRepository.js';
 import type { MovimientoContableEvent } from '../../application/contracts/MovimientoContableEvent.js';
 import pino from 'pino';
+import { prisma } from '../../infrastructure/persistence/PrismaService.js';
+import type { IProcessedEventRepository } from '../../application/abstractions/IProcessedEventRepository.js';
+import { createHash } from 'node:crypto';
 
 type Key9D = {
   PeriodoId: number;
@@ -20,11 +22,11 @@ type Delta = { Debito: number; Credito: number };
 
 export class MessageProcessor {
   constructor(
-    // movimientoRepo no se usa en el flujo incremental, se mantiene para compatibilidad de constructor
-    private readonly movimientoRepo: IMovimientoContableRepository,
     private readonly saldoRepo: ISaldoContableRepository,
     private readonly saldoPeriodoRepo: ISaldoContablePeriodoRepository,
     private readonly logger: pino.Logger,
+    private readonly processedEventRepo?: IProcessedEventRepository,
+    private readonly idempotencyEnabled: boolean = false,
   ) {}
 
   async process(event: MovimientoContableEvent, _batchSize: number): Promise<void> {
@@ -46,69 +48,102 @@ export class MessageProcessor {
     // Cache de finales por periodo para propagar rápidos
     const finalesPorPeriodo = new Map<string, { SaldoFinalDebito: number; SaldoFinalCredito: number }>();
 
-    for (let i = 0; i < periodos.length; i++) {
-      const periodoId = periodos[i]!;
-      const priorPeriodoId = i > 0 ? periodos[i - 1]! : null;
+    const runCore = async (tx: import('@prisma/client').Prisma.TransactionClient) => {
+      for (let i = 0; i < periodos.length; i++) {
+        const periodoId = periodos[i]!;
+        const priorPeriodoId = i > 0 ? periodos[i - 1]! : null;
 
-      for (const [keyStr, delta] of deltasByKey) {
-        const key = this.parseKeyStr(keyStr, periodoId);
+        for (const [keyStr, delta] of deltasByKey) {
+          const key = this.parseKeyStr(keyStr, periodoId);
 
-        // Determinar saldos iniciales
-        let saldoInicialDebito = 0;
-        let saldoInicialCredito = 0;
+          // Determinar saldos iniciales
+          let saldoInicialDebito = 0;
+          let saldoInicialCredito = 0;
 
-        if (i === 0) {
-          // p0: conservar inicial si existe, sino traer de p-1
-          const current = await this.saldoRepo.getByKey(key);
-          if (current) {
-            saldoInicialDebito = current.saldoInicialDebito ?? 0;
-            saldoInicialCredito = current.saldoInicialCredito ?? 0;
-          } else if (priorPeriodoId !== null) {
-            const priorKey = { ...key, PeriodoId: priorPeriodoId } satisfies Key9D;
-            const prior = await this.saldoRepo.getByKey(priorKey);
-            saldoInicialDebito = prior?.saldoFinalDebito ?? 0;
-            saldoInicialCredito = prior?.saldoFinalCredito ?? 0;
+          if (i === 0) {
+            // p0: conservar inicial si existe, sino traer de p-1
+            const current = await this.saldoRepo.getByKey(key, tx);
+            if (current) {
+              saldoInicialDebito = current.saldoInicialDebito ?? 0;
+              saldoInicialCredito = current.saldoInicialCredito ?? 0;
+            } else if (priorPeriodoId !== null) {
+              const priorKey = { ...key, PeriodoId: priorPeriodoId } satisfies Key9D;
+              const prior = await this.saldoRepo.getByKey(priorKey, tx);
+              saldoInicialDebito = prior?.saldoFinalDebito ?? 0;
+              saldoInicialCredito = prior?.saldoFinalCredito ?? 0;
+            }
+          } else {
+            // pi>0: inicial = final del periodo anterior post-ajuste
+            const prevKeyStr = this.keyStr({ ...key, PeriodoId: priorPeriodoId! });
+            const prev = finalesPorPeriodo.get(prevKeyStr);
+            saldoInicialDebito = prev?.SaldoFinalDebito ?? 0;
+            saldoInicialCredito = prev?.SaldoFinalCredito ?? 0;
           }
-        } else {
-          // pi>0: inicial = final del periodo anterior post-ajuste
-          const prevKeyStr = this.keyStr({ ...key, PeriodoId: priorPeriodoId! });
-          const prev = finalesPorPeriodo.get(prevKeyStr);
-          saldoInicialDebito = prev?.SaldoFinalDebito ?? 0;
-          saldoInicialCredito = prev?.SaldoFinalCredito ?? 0;
+
+          // Cargar acumulados actuales del periodo (por si existe)
+          const existing = await this.saldoRepo.getByKey(key, tx);
+          const debitoActual = existing?.debito ?? 0;
+          const creditoActual = existing?.credito ?? 0;
+
+          const applyDelta = i === 0; // Solo en p0
+          const debitoNuevo = applyDelta ? debitoActual + delta.Debito : debitoActual;
+          const creditoNuevo = applyDelta ? creditoActual + delta.Credito : creditoActual;
+
+          const saldoFinalDebito = saldoInicialDebito + debitoNuevo;
+          const saldoFinalCredito = saldoInicialCredito + creditoNuevo;
+
+          const values: any = {
+            SaldoInicialDebito: saldoInicialDebito,
+            SaldoInicialCredito: saldoInicialCredito,
+            SaldoFinalDebito: saldoFinalDebito,
+            SaldoFinalCredito: saldoFinalCredito,
+          };
+          if (applyDelta) {
+            values.Debito = debitoNuevo;
+            values.Credito = creditoNuevo;
+          }
+          await this.saldoRepo.updateByKey(key, values, tx);
+
+          // Guardar finales para usar como inicial en el siguiente periodo
+          finalesPorPeriodo.set(this.keyStr(key), {
+            SaldoFinalDebito: saldoFinalDebito,
+            SaldoFinalCredito: saldoFinalCredito,
+          });
         }
 
-        // Cargar acumulados actuales del periodo (por si existe)
-        const existing = await this.saldoRepo.getByKey(key);
-        const debitoActual = existing?.debito ?? 0;
-        const creditoActual = existing?.credito ?? 0;
-
-        const applyDelta = i === 0; // Solo en p0
-        const debitoNuevo = applyDelta ? debitoActual + delta.Debito : debitoActual;
-        const creditoNuevo = applyDelta ? creditoActual + delta.Credito : creditoActual;
-
-        const saldoFinalDebito = saldoInicialDebito + debitoNuevo;
-        const saldoFinalCredito = saldoInicialCredito + creditoNuevo;
-
-        const values: any = {
-          SaldoInicialDebito: saldoInicialDebito,
-          SaldoInicialCredito: saldoInicialCredito,
-          SaldoFinalDebito: saldoFinalDebito,
-          SaldoFinalCredito: saldoFinalCredito,
-        };
-        if (applyDelta) {
-          values.Debito = debitoNuevo;
-          values.Credito = creditoNuevo;
-        }
-        await this.saldoRepo.updateByKey(key, values);
-
-        // Guardar finales para usar como inicial en el siguiente periodo
-        finalesPorPeriodo.set(this.keyStr(key), {
-          SaldoFinalDebito: saldoFinalDebito,
-          SaldoFinalCredito: saldoFinalCredito,
-        });
+        this.logger.info({ movimientoId, periodoProcesado: periodoId, claves: deltasByKey.size }, '[RABBITMQ] Periodo actualizado');
       }
+    };
 
-      this.logger.info({ movimientoId, periodoProcesado: periodoId, claves: deltasByKey.size }, '[RABBITMQ] Periodo actualizado');
+    if (this.idempotencyEnabled && this.processedEventRepo) {
+      const payloadHash = createHash('sha256').update(JSON.stringify(event)).digest('hex');
+      try {
+        await prisma.$transaction(async (tx) => {
+          // Intentar marcar como en procesamiento (idempotencia)
+          await this.processedEventRepo!.createProcessing(tx, {
+            correlationId: (event as any).CorrelationId,
+            movimientoId: event.id,
+            periodoId: event.PeriodoId,
+            payloadHash,
+          });
+
+          await runCore(tx);
+
+          await this.processedEventRepo!.markCompleted(tx, (event as any).CorrelationId);
+        });
+      } catch (err: any) {
+        // P2002: unique violation -> duplicado, considerado procesado previamente
+        if (err?.code === 'P2002') {
+          this.logger.info({ correlationId: (event as any).CorrelationId }, '[RABBITMQ] Evento duplicado, ACK sin reprocesar');
+          return;
+        }
+        throw err;
+      }
+    } else {
+      // Sin idempotencia, ejecutar en una transacción para evitar parciales
+      await prisma.$transaction(async (tx) => {
+        await runCore(tx);
+      });
     }
 
     this.logger.info({ movimientoId, periodosProcesados: periodos.length, claves: deltasByKey.size }, '[RABBITMQ] Evento procesado');

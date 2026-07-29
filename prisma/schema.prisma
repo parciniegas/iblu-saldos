@@ -109,7 +109,22 @@ model SaldoContablePeriodo {
   @@map("saldos_contables_periodos")
 }
 
+model ProcessedEvent {
+  id            BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  correlationId String    @unique @map("correlation_id") @db.VarChar(100)
+  movimientoId  BigInt?   @map("movimiento_id") @db.UnsignedBigInt
+  periodoId     BigInt    @map("periodo_id") @db.UnsignedBigInt
+  estado        String    @db.VarChar(20)
+  error         String?   @db.Text
+  payloadHash   String?   @map("payload_hash") @db.Char(64)
+  createdAt     DateTime? @map("created_at") @db.Timestamp(0)
+  updatedAt     DateTime? @map("updated_at") @db.Timestamp(0)
+
+  @@index([periodoId], map: "processed_events_periodo_id_IDX")
+  @@map("processed_events")
+}
+
 enum movimiento_contable_consecutivoestado {
   PENDIENTE
   ASIGNADO
-}
+  }

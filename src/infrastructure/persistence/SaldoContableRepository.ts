@@ -9,9 +9,10 @@ const BULK_UPDATE_CHUNK_SIZE = 500;
 const BULK_UPDATE_CHUNK_SIZE_ENV = 'SALDOS_BULK_UPDATE_CHUNK_SIZE';
 
 export class SaldoContableRepository implements ISaldoContableRepository {
-  async getByKey(key: SaldoContableKey): Promise<SaldoContable | null> {
+  async getByKey(key: SaldoContableKey, tx?: Prisma.TransactionClient): Promise<SaldoContable | null> {
     const where: Prisma.SaldoContableWhereInput = this.buildWhereFromKey(key);
-    const saldo = await prisma.saldoContable.findFirst({ where: where });
+    const client = (tx ?? prisma) as Prisma.TransactionClient & typeof prisma;
+    const saldo = await client.saldoContable.findFirst({ where: where });
 
     if (!saldo) return null;
 
@@ -115,7 +116,7 @@ export class SaldoContableRepository implements ISaldoContableRepository {
     return Number(count);
   }
 
-  async updateByKey(key: SaldoContableKey, values: SaldoContableUpdateValues): Promise<void> {
+  async updateByKey(key: SaldoContableKey, values: SaldoContableUpdateValues, tx?: Prisma.TransactionClient): Promise<void> {
     const where: Prisma.SaldoContableWhereInput = this.buildWhereFromKey(key);
 
     const updateData: Record<string, unknown> = { updatedAt: new Date() };
@@ -128,10 +129,11 @@ export class SaldoContableRepository implements ISaldoContableRepository {
     if (values.SaldoFinalCredito !== undefined) updateData.saldoFinalCredito = values.SaldoFinalCredito;
     if (values.Cierre !== undefined) updateData.cierre = values.Cierre;
 
-    const result = await prisma.saldoContable.updateMany({ where, data: updateData });
+    const client = (tx ?? prisma) as Prisma.TransactionClient & typeof prisma;
+    const result = await client.saldoContable.updateMany({ where, data: updateData });
     if ((result?.count ?? 0) === 0) {
       // Upsert: crear si no existe exactamente ese saldo
-      await prisma.saldoContable.create({
+      await client.saldoContable.create({
         data: {
           periodoId: key.PeriodoId,
           terceroId: key.TerceroId ?? null,

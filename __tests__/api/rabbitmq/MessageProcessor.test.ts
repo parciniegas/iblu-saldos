@@ -67,7 +67,7 @@ describe('MessageProcessor', () => {
 
     getPeriodosDesdeIdOrdenadosMock.mockResolvedValue([]);
 
-    const processor = new MessageProcessor(movimientoRepo, saldoRepo, saldoPeriodoRepo, mockLogger);
+    const processor = new MessageProcessor(saldoRepo, saldoPeriodoRepo, mockLogger);
     const event = createEvent({ PeriodoId: 10 });
 
     await processor.process(event, 1000);
@@ -81,7 +81,7 @@ describe('MessageProcessor', () => {
 
     getPeriodosDesdeIdOrdenadosMock.mockResolvedValue([]);
 
-    const processor = new MessageProcessor(movimientoRepo, saldoRepo, saldoPeriodoRepo, mockLogger);
+    const processor = new MessageProcessor(saldoRepo, saldoPeriodoRepo, mockLogger);
     const event = createEvent({ PeriodoId: 99 });
 
     await processor.process(event, 1000);
@@ -114,7 +114,7 @@ describe('MessageProcessor', () => {
 
     saldoRepo.getByPeriodo.mockResolvedValue([{ id: 1, periodoId: 10, terceroId: 200, cuentaContableId: 1105, centroCostoId: 10, debito: 0, credito: 0, saldoFinalDebito: 0, saldoFinalCredito: 0 } as SaldoContable]);
 
-    const processor = new MessageProcessor(movimientoRepo, saldoRepo, saldoPeriodoRepo, mockLogger);
+    const processor = new MessageProcessor(saldoRepo, saldoPeriodoRepo, mockLogger);
     const event = createEvent({
       PeriodoId: 10,
       cuentas: [
@@ -139,6 +139,7 @@ describe('MessageProcessor', () => {
         SaldoFinalDebito: 500,
         SaldoFinalCredito: 150,
       }),
+      expect.anything(),
     );
   });
 
@@ -167,7 +168,7 @@ describe('MessageProcessor', () => {
 
     saldoRepo.getByPeriodo.mockResolvedValue([{ id: 1, periodoId: 10, terceroId: 200, cuentaContableId: 1105, centroCostoId: 10, debito: 0, credito: 0, saldoFinalDebito: 0, saldoFinalCredito: 0 } as SaldoContable]);
 
-    const processor = new MessageProcessor(movimientoRepo, saldoRepo, saldoPeriodoRepo, mockLogger);
+    const processor = new MessageProcessor(saldoRepo, saldoPeriodoRepo, mockLogger);
     const event = createEvent({
       PeriodoId: 10,
       Estado: 'Borrado',
@@ -193,6 +194,7 @@ describe('MessageProcessor', () => {
         SaldoFinalDebito: -500,
         SaldoFinalCredito: -150,
       }),
+      expect.anything(),
     );
   });
 
@@ -202,7 +204,7 @@ describe('MessageProcessor', () => {
     const periodos: SaldoContablePeriodo[] = [{ id: 10, nombre: '2024-01', periodoInicio: new Date('2024-01-01'), cierre: false, cierreAnio: false }];
     getPeriodosDesdeIdOrdenadosMock.mockResolvedValue(periodos);
 
-    const processor = new MessageProcessor(movimientoRepo, saldoRepo, saldoPeriodoRepo, mockLogger);
+    const processor = new MessageProcessor(saldoRepo, saldoPeriodoRepo, mockLogger);
     const event = createEvent({
       PeriodoId: 10,
       cuentas: [
@@ -217,6 +219,7 @@ describe('MessageProcessor', () => {
     expect(saldoRepo.updateByKey).toHaveBeenCalledWith(
       expect.objectContaining({ PeriodoId: 10, CuentaContableId: 1105, TerceroId: 200 }),
       expect.objectContaining({ Debito: 300, Credito: 100 }),
+      expect.anything(),
     );
   });
 
@@ -231,7 +234,7 @@ describe('MessageProcessor', () => {
     ];
     getPeriodosDesdeIdOrdenadosMock.mockResolvedValue(periodos);
 
-    const processor = new MessageProcessor(movimientoRepo, saldoRepo, saldoPeriodoRepo, mockLogger);
+    const processor = new MessageProcessor(saldoRepo, saldoPeriodoRepo, mockLogger);
     const event = createEvent({ PeriodoId: 10, cuentas: [{ MovimientoContableId: 1, CuentaContableId: 1, Debito: 10, Credito: 5 } as any] });
 
     await processor.process(event, 1000);
@@ -252,7 +255,7 @@ describe('MessageProcessor', () => {
     // Simular que en p0 no existe saldo previo (para que inicial de p1 sea igual al delta aplicado en p0)
     (saldoRepo.getByKey as any).mockResolvedValue(null);
 
-    const processor = new MessageProcessor(movimientoRepo, saldoRepo, saldoPeriodoRepo, mockLogger);
+    const processor = new MessageProcessor(saldoRepo, saldoPeriodoRepo, mockLogger);
     const event = createEvent({
       PeriodoId: 10,
       cuentas: [
