@@ -16,6 +16,7 @@ import { MessageProcessor } from './rabbitmq/MessageProcessor.js';
 import { RabbitMQConsumer } from './rabbitmq/RabbitMQConsumer.js';
 import { createJobService } from './services/createJobService.js';
 import { PeriodoScheduler } from './scheduler/PeriodoScheduler.js';
+import { PurgeProcessedEventsScheduler } from './scheduler/PurgeProcessedEventsScheduler.js';
 import { ProcessedEventRepository } from '../infrastructure/persistence/ProcessedEventRepository.js';
 
 const config = loadConfig();
@@ -111,6 +112,7 @@ async function start(): Promise<FastifyInstance> {
 
   let rabbitmqConsumer: RabbitMQConsumer | null = null;
   let periodoScheduler: PeriodoScheduler | null = null;
+  let purgeScheduler: PurgeProcessedEventsScheduler | null = null;
 
   if (config.rabbitmq) {
     const processedEventRepo = new ProcessedEventRepository();
@@ -143,9 +145,30 @@ async function start(): Promise<FastifyInstance> {
     prismaLogger.warn({ error: error instanceof Error ? error.message : String(error) }, 'No se pudo iniciar el scheduler de periodos');
   }
 
+  // Iniciar purga de processed_events si idempotencia habilitada y purga habilitada
+  try {
+    if (config.rabbitmq?.idempotencyEnabled && config.rabbitmq.processedEvents?.enabled) {
+      purgeScheduler = new PurgeProcessedEventsScheduler(prismaLogger);
+      purgeScheduler.start({
+        enabled: true,
+        cron: config.rabbitmq.processedEvents.purgeCron ?? '30 3 * * *',
+        retentionDays: config.rabbitmq.processedEvents.retentionDays ?? 90,
+        chunkSize: config.rabbitmq.processedEvents.chunkSize ?? 5000,
+        stuckHours: config.rabbitmq.processedEvents.stuckHours ?? 24,
+        optimizeAfterDeletes: config.rabbitmq.processedEvents.optimizeAfterDeletes ?? 100000,
+      });
+      prismaLogger.info({ cron: config.rabbitmq.processedEvents.purgeCron }, 'Scheduler de purga iniciado');
+    } else {
+      prismaLogger.info('Scheduler de purga desactivado (idempotencia o purga no habilitadas)');
+    }
+  } catch (error) {
+    prismaLogger.warn({ error: error instanceof Error ? error.message : String(error) }, 'No se pudo iniciar el scheduler de purga');
+  }
+
   app.addHook('onClose', async () => {
     await rabbitmqConsumer?.stop();
     periodoScheduler?.stop();
+    purgeScheduler?.stop();
     await disconnectPrisma();
   });
 

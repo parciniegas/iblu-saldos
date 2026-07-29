@@ -23,7 +23,16 @@
     "queueName": "saldos_movimientos",
     "prefetch": 1,
     "retryAttempts": 3,
-    "retryDelayMs": 5000
+    "retryDelayMs": 5000,
+    "idempotencyEnabled": true,
+    "processedEvents": {
+      "enabled": true,
+      "retentionDays": 90,
+      "purgeCron": "30 3 * * *",
+      "chunkSize": 5000,
+      "stuckHours": 24,
+      "optimizeAfterDeletes": 100000
+    }
   },
   "scheduler": {
     "createPeriodoCron": "30 0 1 * *"

@@ -31,6 +31,14 @@ export type AppConfig = {
     retryAttempts: number;
     retryDelayMs: number;
     idempotencyEnabled?: boolean;
+    processedEvents?: {
+      enabled?: boolean;
+      retentionDays?: number;
+      purgeCron?: string;
+      chunkSize?: number;
+      stuckHours?: number;
+      optimizeAfterDeletes?: number;
+    };
   };
   scheduler?: {
     createPeriodoCron?: string; // cron expresión para crear periodo automáticamente
@@ -75,6 +83,14 @@ function getDefaultConfig(): AppConfig {
       retryAttempts: 3,
       retryDelayMs: 5000,
       idempotencyEnabled: false,
+      processedEvents: {
+        enabled: true,
+        retentionDays: 90,
+        purgeCron: '30 3 * * *',
+        chunkSize: 5000,
+        stuckHours: 24,
+        optimizeAfterDeletes: 100000,
+      },
     },
     scheduler: { createPeriodoCron: '30 0 1 * *' },
   };
@@ -94,6 +110,25 @@ function applyEnvOverrides(config: AppConfig): AppConfig {
         retryAttempts: getEnvInt('RABBITMQ__RetryAttempts', config.rabbitmq.retryAttempts),
         retryDelayMs: getEnvInt('RABBITMQ__RetryDelayMs', config.rabbitmq.retryDelayMs),
         idempotencyEnabled: getEnv('RABBITMQ__IdempotencyEnabled', String(config.rabbitmq.idempotencyEnabled ?? 'false')).toLowerCase() === 'true',
+        processedEvents: {
+          enabled:
+            getEnv('RABBITMQ__ProcessedEvents__Enabled', String(config.rabbitmq.processedEvents?.enabled ?? 'true')).toLowerCase() ===
+            'true',
+          retentionDays: getEnvInt(
+            'RABBITMQ__ProcessedEvents__RetentionDays',
+            config.rabbitmq.processedEvents?.retentionDays ?? 90,
+          ),
+          purgeCron: getEnv(
+            'RABBITMQ__ProcessedEvents__PurgeCron',
+            config.rabbitmq.processedEvents?.purgeCron ?? '30 3 * * *',
+          ),
+          chunkSize: getEnvInt('RABBITMQ__ProcessedEvents__ChunkSize', config.rabbitmq.processedEvents?.chunkSize ?? 5000),
+          stuckHours: getEnvInt('RABBITMQ__ProcessedEvents__StuckHours', config.rabbitmq.processedEvents?.stuckHours ?? 24),
+          optimizeAfterDeletes: getEnvInt(
+            'RABBITMQ__ProcessedEvents__OptimizeAfterDeletes',
+            config.rabbitmq.processedEvents?.optimizeAfterDeletes ?? 100000,
+          ),
+        },
       }
     : undefined;
 
