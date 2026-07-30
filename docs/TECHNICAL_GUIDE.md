@@ -65,13 +65,13 @@ La aplicación es un **único proceso Node.js** que ofrece:
 ```text
                         ┌──────────────────────────────────────────┐
                         │              saldos-node (TS)            │
-   HTTP (clientes) ───►│  Fastify API  ────┬──► JobService (JSON)  │
+   HTTP (clientes) ───► │  Fastify API  ───┬──► JobService (JSON)  │
                         │                  │                       │
                         │                  ├──► Prisma (MySQL)     │
                         │                  │                       │
                         │                  └──► Schedulers (cron)  │
                         │                          │               │
-                        │  RabbitMQConsumer ◄───────┘               │
+                        │  RabbitMQConsumer ◄──────┘               │
                         └──────────────────┬───────────────────────┘
                                            │
                   amqp  ◄────── MovimientoContableEvent
@@ -225,15 +225,15 @@ El modelo está definido en `prisma/schema.prisma`. Las tablas usan nombres fís
                                 │ bulkUpdate / updateByKey
                                 │
 ┌─────────────────────┐         │      ┌───────────────────────────┐
-│ movimiento_contable │────┐    │      │   saldos_contables_periodos │
-│ (asientos)          │    │    │      │   (catálogo de periodos)   │
-└────┬────────────────┘    │    │      └────────▲──────────────────┘
-     │ id                  │    │               │
-     ▼                     │    │               │ create/copyFromPeriodo
-┌─────────────────────────┐│    │               │
-│movimiento_contable_cuentas│└───┴───────────────┘
-│  (líneas por cuenta)     │
-└─────────────────────────┘
+│ movimiento_contable │──────┐  │      │ saldos_contables_periodos │
+│ (asientos)          │      │  │      │  (catálogo de periodos)   │
+└────┬────────────────┘      │  │      └────────▲──────────────────┘
+     │ id                    │  │               │
+     ▼                       │  │               │ create/copyFromPeriodo
+┌───────────────────────────┐│  │               │
+│movimiento_contable_cuentas│└──┴───────────────┘
+│  (líneas por cuenta)      │
+└───────────────────────────┘
 
      (events AMQP)
           │
@@ -630,7 +630,7 @@ Las operaciones batch y de creación de periodo son **asíncronas**: el endpoint
                               │ processing │──┬──► canceled (por usuario vía POST cancel)
                               └──────┬─────┘  │
                                      │ éxito  │
-                                     ▼       │
+                                     ▼        │
                                  ┌───────────┐
                                  │ completed │
                                  └───────────┘
@@ -1097,44 +1097,44 @@ Esto:
 ### 10.4 Flujo completo de una llamada autenticada
 
 ```text
-Cliente                      Fastify                   Auth Hook                    Handler
-   │                            │                          │                          │
-   │  POST /api/v1/saldos/x   │                          │                          │
-   │  X-API-Key: abc123…       │                          │                          │
-   │  Content-Type: …          │                          │                          │
-   ├───────────────────────────►│                          │                          │
-   │                            │  onRequest hook          │                          │
-   │                            ├─────────────────────────►│                          │
+Cliente                      Fastify                   Auth Hook                     Handler
+   │                            │                          │                           │
+   │  POST /api/v1/saldos/x     │                          │                           │
+   │  X-API-Key: abc123…        │                          │                           │
+   │  Content-Type: …           │                          │                           │
+   ├───────────────────────────►│                          │                           │
+   │                            │  onRequest hook          │                           │
+   │                            ├─────────────────────────►│                           │
    │                            │                          │ url.startsWith('/health') │
    │                            │                          │ o '/documentation'?       │
-   │                            │                          │                          │
+   │                            │                          │                           │
    │                            │                          │  NO                       │
-   │                            │                          │                          │
+   │                            │                          │                           │
    │                            │                          │ apiKey header presente?   │
-   │                            │                          │                          │
+   │                            │                          │                           │
    │                            │                          │ NO → 401 API key requerida│
-   │                            │◄─────────────────────────┤                          │
-   │                            │  (return early)         │                          │
-   │                            │                          │                          │
+   │                            │◄─────────────────────────┤                           │
+   │                            │  (return early)          │                           │
+   │                            │                          │                           │
    │                            │                          │ cargar config.apiKeys.    │
-   │                            │                          │ allowedKeys              │
-   │                            │                          │                          │
+   │                            │                          │ allowedKeys               │
+   │                            │                          │                           │
    │                            │                          │ allowedKeys.length == 0?  │
    │                            │                          │  → modo abierto (dev)     │
-   │                            │                          │                          │
+   │                            │                          │                           │
    │                            │                          │ apiKey ∈ allowedKeys?     │
-   │                            │                          │                          │
+   │                            │                          │                           │
    │                            │                          │  NO → 401 API key inválida│
-   │                            │◄─────────────────────────┤                          │
-   │  ◄── 401 ──────────────────┤                          │                          │
-   │                            │                          │                          │
-   │                            │                          │  SÍ                      │
-   │                            │                          ├─────────────────────────►│
-   │                            │                          │                          │
-   │                            │                          │                          │ handler ejecuta …
-   │                            │                          │                          │
-   │  ◄── 200/202/4xx/5xx ──────┤◄─────────────────────────┼──────────────────────────┤
-   │                            │                          │                          │
+   │                            │◄─────────────────────────┤                           │
+   │  ◄── 401 ──────────────────┤                          │                           │
+   │                            │                          │                           │
+   │                            │                          │  SÍ                       │
+   │                            │                          ├──────────────────────────►│
+   │                            │                          │                           │
+   │                            │                          │                           │ handler ejecuta …
+   │                            │                          │                           │
+   │  ◄── 200/202/4xx/5xx ──────┤◄─────────────────────────┼───────────────────────────┤
+   │                            │                          │                           │
 ```
 
 ### 10.5 Modo "abierto" (peligro en producción)
@@ -1250,26 +1250,26 @@ Para cada `periodoId` (filtrados por `periodoinicio >= fechaDesde`, ordenados po
    ┌───────────────────────────────────────────┐
    │ RabbitMQConsumer.processMessage(msg)      │
    │                                           │
-   │ 1. JSON.parse del payload                  │
-   │ 2. parseAndNormalizeMovimientoEvent (Zod)  │
-   │    - lanza Error(code='INVALID_EVENT_…')   │
+   │ 1. JSON.parse del payload                 │
+   │ 2. parseAndNormalizeMovimientoEvent (Zod) │
+   │    - lanza Error(code='INVALID_EVENT_…')  │
    │      si la validación falla               │
    │ 3. processor.process(event)               │
-   │    - dentro de prisma.$transaction:        │
-   │      a. processedEvent.createProcessing    │
-   │      b. apply deltas periodo a periodo     │
-   │      c. processedEvent.markCompleted       │
-   │    - si P2002 (UNIQUE correlation_id):     │
+   │    - dentro de prisma.$transaction:       │
+   │      a. processedEvent.createProcessing   │
+   │      b. apply deltas periodo a periodo    │
+   │      c. processedEvent.markCompleted      │
+   │    - si P2002 (UNIQUE correlation_id):    │
    │      → log info + ACK sin reprocesar      │
-   │ 4. ACK                                     │
+   │ 4. ACK                                    │
    │                                           │
-   │ Si INVALID_EVENT_PAYLOAD:                  │
-   │   nack(msg, false, false) → directo a DLQ  │
-   │ Si otro error:                             │
-   │   retryCount < retryAttempts?              │
-   │     → nack(requeue=true) tras backoff      │
-   │   Sino:                                    │
-   │     → nack(requeue=false) → DLQ            │
+   │ Si INVALID_EVENT_PAYLOAD:                 │
+   │   nack(msg, false, false) → directo a DLQ │
+   │ Si otro error:                            │
+   │   retryCount < retryAttempts?             │
+   │     → nack(requeue=true) tras backoff     │
+   │   Sino:                                   │
+   │     → nack(requeue=false) → DLQ           │
    └───────────────────────────────────────────┘
 ```
 
